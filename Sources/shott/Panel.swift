@@ -9,7 +9,7 @@ final class PanelView: NSView {
     private let countLabel = NSTextField(labelWithString: "")
     private let guideLabel = NSTextField(labelWithString: "")
 
-    static let guideText = "숫자 클릭   글자 검색   ⌘+숫자 우클릭   ⏎ 클릭   ⇧↑↓ 스크롤   esc 취소"
+    static let guideText = "숫자 클릭   글자 검색   ⏎ 클릭   ⌘+숫자 우클릭   ⇧↑↓ 스크롤   ⌘Tab 창전환   esc 취소"
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -63,9 +63,9 @@ final class PanelView: NSView {
 enum Panel {
     static let size = NSSize(width: 560, height: 100)
 
-    /// Wrap the panel content in a Liquid Glass surface (macOS 26+), else a frosted fallback.
+    /// Wrap any content view in a Liquid Glass surface (macOS 26+), else a frosted fallback.
     @MainActor
-    static func makeGlass(_ content: PanelView) -> NSView {
+    static func makeGlass(_ content: NSView, size: NSSize) -> NSView {
         let frame = NSRect(origin: .zero, size: size)
         content.frame = frame
         content.autoresizingMask = [.width, .height]

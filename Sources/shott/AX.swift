@@ -12,6 +12,12 @@ struct Hit {
     let frame: CGRect   // AX/global coords: top-left origin
 }
 
+struct WindowInfo {
+    let element: AXUIElement
+    let pid: pid_t
+    let label: String
+}
+
 enum AX {
     static func attr(_ e: AXUIElement, _ a: String) -> AnyObject? {
         var v: AnyObject?
@@ -62,23 +68,66 @@ enum AX {
         }
     }
 
-    /// Clickable elements across the frontmost app, its menu bar, and the Dock / menu extras.
-    static func scan(screen: CGRect) -> [Hit] {
-        var roots: [(AXUIElement, pid_t)] = []
-        if let front = NSWorkspace.shared.frontmostApplication {
-            let pid = front.processIdentifier
-            let app = AXUIElementCreateApplication(pid)
-            roots.append((app, pid))
-            if let mb = attr(app, kAXMenuBarAttribute as String) { roots.append((mb as! AXUIElement, pid)) }
-        }
+    // Always-available targets: the menu bar's neighbours — Dock and menu-bar extras.
+    private static func collectExtras(screen: CGRect, into hits: inout [Hit]) {
         let extras = ["com.apple.dock", "com.apple.controlcenter", "com.apple.systemuiserver"]
         for ra in NSWorkspace.shared.runningApplications
         where ra.bundleIdentifier.map(extras.contains) == true {
-            roots.append((AXUIElementCreateApplication(ra.processIdentifier), ra.processIdentifier))
+            collect(AXUIElementCreateApplication(ra.processIdentifier), pid: ra.processIdentifier,
+                    screen: screen, depth: 0, into: &hits)
         }
+    }
+
+    /// Clickable elements across the target app (default: frontmost), its menu bar, and the
+    /// Dock / menu extras.
+    static func scan(screen: CGRect, frontApp: NSRunningApplication? = nil) -> [Hit] {
         var hits: [Hit] = []
-        for (root, pid) in roots { collect(root, pid: pid, screen: screen, depth: 0, into: &hits) }
+        if let front = frontApp ?? NSWorkspace.shared.frontmostApplication {
+            let pid = front.processIdentifier
+            let app = AXUIElementCreateApplication(pid)
+            collect(app, pid: pid, screen: screen, depth: 0, into: &hits)
+            if let mb = attr(app, kAXMenuBarAttribute as String) {
+                collect(mb as! AXUIElement, pid: pid, screen: screen, depth: 0, into: &hits)
+            }
+        }
+        collectExtras(screen: screen, into: &hits)
         return hits
+    }
+
+    /// Clickable elements of one specific window, plus its app's menu bar and the Dock / extras.
+    static func scanWindow(_ window: AXUIElement, appPid: pid_t, screen: CGRect) -> [Hit] {
+        var hits: [Hit] = []
+        collect(window, pid: appPid, screen: screen, depth: 0, into: &hits)
+        let app = AXUIElementCreateApplication(appPid)
+        if let mb = attr(app, kAXMenuBarAttribute as String) {
+            collect(mb as! AXUIElement, pid: appPid, screen: screen, depth: 0, into: &hits)
+        }
+        collectExtras(screen: screen, into: &hits)
+        return hits
+    }
+
+    /// Open, on-screen windows of regular apps (titles via AX — no screen-recording permission).
+    static func windows() -> [WindowInfo] {
+        var out: [WindowInfo] = []
+        let mypid = ProcessInfo.processInfo.processIdentifier
+        for ra in NSWorkspace.shared.runningApplications
+        where ra.activationPolicy == .regular && ra.processIdentifier != mypid {
+            let axApp = AXUIElementCreateApplication(ra.processIdentifier)
+            guard let wins = attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement] else { continue }
+            let appName = ra.localizedName ?? "?"
+            for w in wins {
+                guard let f = frame(of: w), f.width > 60, f.height > 60 else { continue }
+                let title = str(w, kAXTitleAttribute as String) ?? ""
+                let label = title.isEmpty ? appName : "\(appName) — \(title)"
+                out.append(WindowInfo(element: w, pid: ra.processIdentifier, label: label))
+            }
+        }
+        return out
+    }
+
+    /// Bring a window to the front (its element handle stays valid regardless of focus).
+    static func raise(_ window: AXUIElement) {
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     }
 
     private static func center(_ hit: Hit) -> CGPoint {
