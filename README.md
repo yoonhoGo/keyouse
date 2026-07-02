@@ -12,7 +12,15 @@ Swift + AppKit, built on the macOS Accessibility API (`AXUIElement`). Ships as a
 - Swift 6 toolchain (Command Line Tools is enough; Xcode.app not required)
 - **Accessibility** permission is required. Using `⌘Tab` window switching may also need **Input Monitoring**.
 
-## Install / run
+## Install
+
+```bash
+brew install yoonhoGo/tap/keyouse
+```
+
+Built from source on install (no code signing needed — Gatekeeper doesn't block a locally built binary). Requires Xcode Command Line Tools.
+
+## Build / run from source
 
 ```bash
 make run          # build release and run (the terminal returns immediately)
