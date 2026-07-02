@@ -20,6 +20,21 @@ enum Settings {
         get { d.string(forKey: "triggerLabel") ?? "Space" }
         set { d.set(newValue, forKey: "triggerLabel") }
     }
+    /// Show the shortcut guide grid beneath the search field.
+    static var showGuide: Bool {
+        get { d.object(forKey: "showGuide") as? Bool ?? true }
+        set { d.set(newValue, forKey: "showGuide") }
+    }
+    /// Guide font size (pt).
+    static var guideFontSize: Double {
+        get { let v = d.double(forKey: "guideFontSize"); return v > 0 ? v : 14 }
+        set { d.set(newValue, forKey: "guideFontSize") }
+    }
+    /// Panel opacity while a modifier is held / a number is being entered. 0 = fully hidden.
+    static var panelActiveOpacity: Double {
+        get { d.object(forKey: "panelActiveOpacity") as? Double ?? 0.0 }
+        set { d.set(newValue, forKey: "panelActiveOpacity") }
+    }
     /// Seconds to wait after scrolling stops before re-scanning hints.
     static var scrollRescanDelay: Double {
         get { let v = d.double(forKey: "scrollRescanDelay"); return v > 0 ? v : 1.0 }
@@ -58,6 +73,8 @@ final class SettingsWindow: NSObject {
     private var window: NSWindow?
     private var hotkeyButton: NSButton?
     private var delayLabel: NSTextField?
+    private var fontLabel: NSTextField?
+    private var opacityLabel: NSTextField?
     private var recordMonitor: Any?
     private var recording = false
 
@@ -91,6 +108,30 @@ final class SettingsWindow: NSObject {
         stack.addArrangedSubview(caption("버튼을 누른 뒤 원하는 조합을 입력하세요."))
 
         stack.addArrangedSubview(spacer())
+        let guideCB = NSButton(checkboxWithTitle: "단축키 가이드 표시", target: self, action: #selector(toggleGuide(_:)))
+        guideCB.state = Settings.showGuide ? .on : .off
+        stack.addArrangedSubview(guideCB)
+
+        stack.addArrangedSubview(spacer())
+        stack.addArrangedSubview(header("가이드 글자 크기"))
+        let fontSlider = NSSlider(value: Settings.guideFontSize, minValue: 10, maxValue: 20,
+                                  target: self, action: #selector(fontChanged(_:)))
+        fontSlider.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        let fl = caption(String(format: "%.0fpt", Settings.guideFontSize)); fontLabel = fl
+        let fontRow = NSStackView(views: [fontSlider, fl]); fontRow.spacing = 8
+        stack.addArrangedSubview(fontRow)
+
+        stack.addArrangedSubview(spacer())
+        stack.addArrangedSubview(header("입력 중 패널 불투명도"))
+        let opSlider = NSSlider(value: Settings.panelActiveOpacity, minValue: 0.0, maxValue: 1.0,
+                                target: self, action: #selector(opacityChanged(_:)))
+        opSlider.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        let ol = caption(opacityText(Settings.panelActiveOpacity)); opacityLabel = ol
+        let opRow = NSStackView(views: [opSlider, ol]); opRow.spacing = 8
+        stack.addArrangedSubview(opRow)
+        stack.addArrangedSubview(caption("modifier를 누르거나 번호 입력 시 패널 투명도 (0 = 숨김)."))
+
+        stack.addArrangedSubview(spacer())
         stack.addArrangedSubview(header("스크롤 후 재스캔 딜레이"))
         let slider = NSSlider(value: Settings.scrollRescanDelay, minValue: 0.2, maxValue: 3.0,
                               target: self, action: #selector(delayChanged(_:)))
@@ -119,7 +160,7 @@ final class SettingsWindow: NSObject {
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
 
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 720),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "shott 환경설정"
         w.contentView = content
@@ -137,6 +178,22 @@ final class SettingsWindow: NSObject {
     }
     private func spacer() -> NSView {
         let v = NSView(); v.heightAnchor.constraint(equalToConstant: 8).isActive = true; return v
+    }
+
+    @objc private func toggleGuide(_ s: NSButton) { Settings.showGuide = (s.state == .on) }
+
+    private func opacityText(_ v: Double) -> String { v <= 0.01 ? "숨김" : String(format: "%.0f%%", v * 100) }
+
+    @objc private func fontChanged(_ s: NSSlider) {
+        let v = s.doubleValue.rounded()
+        Settings.guideFontSize = v
+        fontLabel?.stringValue = String(format: "%.0fpt", v)
+    }
+
+    @objc private func opacityChanged(_ s: NSSlider) {
+        let v = (s.doubleValue * 20).rounded() / 20   // 0.05 steps
+        Settings.panelActiveOpacity = v
+        opacityLabel?.stringValue = opacityText(v)
     }
 
     @objc private func delayChanged(_ sender: NSSlider) {

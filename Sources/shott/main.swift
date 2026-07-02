@@ -33,6 +33,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var panelGlass: NSView?
     private var globalMonitor: Any?
     private var localMonitor: Any?
+    private var mouseMonitor: Any?
+    private var modActive = false        // any modifier held -> hide panel so it doesn't obscure
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
@@ -103,10 +105,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         hv.autoresizingMask = [.width, .height]
         container.addSubview(hv)
 
-        let pv = PanelView(frame: .zero)
+        let showGuide = Settings.showGuide
+        let pv = PanelView(showGuide: showGuide)
         pv.field.delegate = self
-        let glass = Panel.makeGlass(pv, size: Panel.size)
-        glass.frame.origin = NSPoint(x: (screen.frame.width - Panel.size.width) / 2,
+        let size = Panel.size(showGuide: showGuide)
+        let glass = Panel.makeGlass(pv, size: size)
+        glass.frame.origin = NSPoint(x: (screen.frame.width - size.width) / 2,
                                      y: screen.frame.height * 0.4)
         container.addSubview(glass)
 
@@ -119,11 +123,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         w.makeFirstResponder(pv.field)
         enableTap()
 
+        // A mouse click anywhere (all clicks pass through the overlay) means "go use that window".
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dismiss(restoreFocus: false) }
+        }
+
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] e in
             if e.type == .flagsChanged {
                 let cmd = e.modifierFlags.contains(.command)
                 let ctrl = e.modifierFlags.contains(.control)
-                MainActor.assumeIsolated { self?.setFilter(cmd: cmd, ctrl: ctrl) }
+                let anyMod = !e.modifierFlags.intersection([.command, .control, .shift, .option]).isEmpty
+                MainActor.assumeIsolated {
+                    self?.setFilter(cmd: cmd, ctrl: ctrl)
+                    self?.modActive = anyMod
+                    self?.updatePanelVisibility()
+                }
                 return e
             }
             let keyCode = e.keyCode
@@ -197,6 +211,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if mods.contains(.control), chars?.lowercased() == "i" { focusFirstInput(); return true } // ⌃I first input
         switch keyCode {
         case 53: dismiss(restoreFocus: true); return true
+        case 51:                                                                        // Backspace
+            if !hintBuffer.isEmpty { hintBuffer = String(hintBuffer.dropLast()); pushHighlights(); return true }
+            return false   // no number in progress -> let the field delete search text
         case 36: act(on: selected, rightClick: mods.contains(.shift)); return true      // ⇧⏎ = right click
         case 125: mods.contains(.shift) ? scrollSelected(pageUp: false) : move(1); return true
         case 126: mods.contains(.shift) ? scrollSelected(pageUp: true) : move(-1); return true
@@ -272,6 +289,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         highlight?.typed = hintBuffer
         highlight?.selected = selected
         highlight?.needsDisplay = true
+        updatePanelVisibility()
+    }
+
+    // While a modifier is held or a number is being entered, dim/hide the panel so it never
+    // covers the element you're aiming at. Behaviour is configurable (opacity; 0 = fully hidden,
+    // via isHidden so the view is truly removed, not just transparent). Restore on release/clear.
+    private func updatePanelVisibility() {
+        guard let glass = panelGlass else { return }
+        let active = modActive || !hintBuffer.isEmpty
+        if active {
+            let o = Settings.panelActiveOpacity
+            if o <= 0.01 { glass.isHidden = true }
+            else { glass.isHidden = false; glass.alphaValue = o }
+        } else {
+            glass.isHidden = false; glass.alphaValue = 1
+        }
     }
 
     private func pushDigit(_ d: String, rightClick: Bool) {
@@ -410,11 +443,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         rescanWork?.cancel(); rescanWork = nil
         disableTap()
         if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
+        if let m = mouseMonitor { NSEvent.removeMonitor(m); mouseMonitor = nil }
         window?.delegate = nil
         window?.orderOut(nil)
         window = nil; highlight = nil; panelView = nil; panelGlass = nil
         pickerGlass = nil; pickerView = nil; windows = []; mode = .search
-        allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none; sticky = false
+        allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none; sticky = false; modActive = false
         if restoreFocus { previousApp?.activate() }
         previousApp = nil; targetWindow = nil
     }
