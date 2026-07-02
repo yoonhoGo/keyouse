@@ -30,6 +30,11 @@ enum Settings {
                        "guideFontSize", "panelActiveOpacity", "scrollRescanDelay",
                        "cmdVisibleRoles", "ctrlVisibleRoles", "language"]
 
+    /// Sentinel triggerKeyCode meaning "double-tap the trigger modifier" (no real key). 0xFFFF
+    /// never matches an actual keyCode, so the keyDown path stays inert for this trigger.
+    static let doubleTapKeyCode: UInt16 = 0xFFFF
+    static var isDoubleTapTrigger: Bool { triggerKeyCode == doubleTapKeyCode }
+
     private static var d: UserDefaults { .standard }
 
     static func reset() { keys.forEach { d.removeObject(forKey: $0) } }
@@ -87,6 +92,7 @@ enum Settings {
     }
 
     static func triggerDisplay() -> String {
+        if isDoubleTapTrigger { return triggerLabel }   // e.g. "⌘⌘"
         var s = ""
         let m = triggerModifiers
         if m.contains(.control) { s += "⌃" }
@@ -105,7 +111,12 @@ final class SettingsWindow: NSObject {
     private var fontLabel: NSTextField?
     private var opacityLabel: NSTextField?
     private var recordMonitor: Any?
+    private var recordFlagsMonitor: Any?
     private var recording = false
+    // Double-tap detection while recording a hotkey.
+    private var recPrevMods: NSEvent.ModifierFlags = []
+    private var recLastMod: NSEvent.ModifierFlags = []
+    private var recLastTapTime: TimeInterval = 0
     var onLanguageChange: (() -> Void)?
 
     // (AX role, display name) — the roles offered as filter checkboxes.
@@ -147,7 +158,8 @@ final class SettingsWindow: NSObject {
         hk.bezelStyle = .rounded
         hotkeyButton = hk
         stack.addArrangedSubview(hk)
-        stack.addArrangedSubview(caption(L.t("Click the button, then press the combo.", "버튼을 누른 뒤 원하는 조합을 입력하세요.")))
+        stack.addArrangedSubview(caption(L.t("Click the button, then press a combo — or double-tap a modifier (⌘⌘).",
+                                             "버튼을 누른 뒤 조합을 입력하거나, 모디파이어를 두 번 누르세요 (⌘⌘).")))
 
         stack.addArrangedSubview(spacer())
         let loginCB = NSButton(checkboxWithTitle: L.t("Start at login", "로그인 시 시작"), target: self, action: #selector(toggleLogin(_:)))
@@ -305,6 +317,7 @@ final class SettingsWindow: NSObject {
     @objc private func toggleRecord(_ sender: NSButton) {
         if recording { stopRecording(); return }
         recording = true
+        recPrevMods = []; recLastMod = []; recLastTapTime = 0
         sender.title = L.t("Press a key…", "키 입력…")
         recordMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             let keyCode = e.keyCode
@@ -312,6 +325,40 @@ final class SettingsWindow: NSObject {
             let chars = e.charactersIgnoringModifiers
             MainActor.assumeIsolated { self?.capture(keyCode: keyCode, mods: mods, chars: chars) }
             return nil
+        }
+        recordFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] e in
+            let raw = e.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue
+            MainActor.assumeIsolated { self?.recordFlags(modsRaw: raw) }
+            return nil
+        }
+    }
+
+    private static let modKeys: [NSEvent.ModifierFlags] = [.command, .option, .control, .shift]
+
+    private func modSymbol(_ m: NSEvent.ModifierFlags) -> String {
+        if m == .command { return "⌘" }; if m == .option { return "⌥" }
+        if m == .control { return "⌃" }; if m == .shift { return "⇧" }; return "?"
+    }
+
+    // A single modifier tapped twice (from released) within the window → set a double-tap trigger.
+    private func recordFlags(modsRaw: UInt) {
+        let mods = NSEvent.ModifierFlags(rawValue: modsRaw)
+        let count = Self.modKeys.filter { mods.contains($0) }.count
+        let rising = count == 1 && recPrevMods.isEmpty   // one modifier pressed from nothing
+        recPrevMods = mods
+        guard rising else {
+            if count > 1 { recLastMod = [] }             // a combo is forming → drop the candidate
+            return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        if mods == recLastMod, now - recLastTapTime < 0.35 {
+            Settings.triggerKeyCode = Settings.doubleTapKeyCode
+            Settings.triggerModifiers = mods
+            Settings.triggerLabel = modSymbol(mods) + modSymbol(mods)
+            stopRecording()
+            hotkeyButton?.title = Settings.triggerDisplay()
+        } else {
+            recLastMod = mods; recLastTapTime = now
         }
     }
 
@@ -325,6 +372,7 @@ final class SettingsWindow: NSObject {
 
     private func stopRecording() {
         if let m = recordMonitor { NSEvent.removeMonitor(m); recordMonitor = nil }
+        if let m = recordFlagsMonitor { NSEvent.removeMonitor(m); recordFlagsMonitor = nil }
         recording = false
     }
 

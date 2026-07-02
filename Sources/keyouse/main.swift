@@ -33,7 +33,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var panelView: PanelView?
     private var panelGlass: NSView?
     private var globalMonitor: Any?
+    private var flagsMonitor: Any?
     private var localMonitor: Any?
+    // Double-tap ⌘ detection (opt-in trigger).
+    private var lastCmdTapTime: TimeInterval = 0
+    private var cmdTapInterrupted = false
+    private var prevCmdDown = false
     private var mouseMonitor: Any?
     private var modActive = false        // any modifier held -> hide panel so it doesn't obscure
     private var statusItem: NSStatusItem?
@@ -73,8 +78,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             let keyCode = e.keyCode
             let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
             MainActor.assumeIsolated {
+                self?.cmdTapInterrupted = true   // any keypress breaks a clean ⌘ double-tap
                 if keyCode == Settings.triggerKeyCode, mods == Settings.triggerModifiers { self?.activate() }
             }
+        }
+        flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] e in
+            let raw = e.modifierFlags.intersection([.command, .option, .control, .shift]).rawValue
+            MainActor.assumeIsolated { self?.onFlagsChanged(modsRaw: raw) }
         }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -119,6 +129,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
     private var primaryScreen: NSScreen? {
         NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
+    }
+
+    // Fire on a clean double-tap of the configured trigger modifier: two modifier-alone presses
+    // within the window, uninterrupted by any other key or modifier. Only active when the trigger
+    // is a double-tap type. ponytail: monotonic uptime clock; 0.35s matches the OS double-click feel.
+    private func onFlagsChanged(modsRaw: UInt) {
+        guard Settings.isDoubleTapTrigger else { return }
+        let mods = NSEvent.ModifierFlags(rawValue: modsRaw)
+        let target = Settings.triggerModifiers
+        let targetDown = mods.contains(target)
+        if !mods.subtracting(target).isEmpty { cmdTapInterrupted = true }   // combo, not a clean tap
+        let rising = targetDown && !prevCmdDown
+        prevCmdDown = targetDown
+        guard rising, mods == target else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if !cmdTapInterrupted, now - lastCmdTapTime < 0.35 {
+            lastCmdTapTime = 0
+            activate()
+        } else {
+            lastCmdTapTime = now
+        }
+        cmdTapInterrupted = false
     }
 
     private func activate() {
