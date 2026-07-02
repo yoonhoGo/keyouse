@@ -42,6 +42,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var hintBuffer = ""
     private var previousApp: NSRunningApplication?
     private var targetWindow: AXUIElement?   // set when a specific window was picked; nil = whole app
+    private var rescanWork: DispatchWorkItem?   // debounced rescan after scrolling stops
 
     private var mode: Mode = .search
     private var windows: [WindowInfo] = []
@@ -51,7 +52,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var cmdWasDown = false
     private enum Filter { case none, controls, forms }
     private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields
-    private static let formRoles: Set<String> = ["AXTextField", "AXTextArea", "AXCheckBox", "AXRadioButton"]
     private lazy var settings = SettingsWindow()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -229,7 +229,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         switch filter {
         case .none: break
         case .controls: let v = Settings.cmdVisibleRoles; base = base.filter { v.contains($0.role) }
-        case .forms: base = base.filter { Self.formRoles.contains($0.role) }
+        case .forms: let v = Settings.ctrlVisibleRoles; base = base.filter { v.contains($0.role) }
         }
         matches = base
         selected = min(selected, max(0, matches.count - 1))
@@ -288,6 +288,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         let pid = matches.indices.contains(selected) ? matches[selected].pid : previousApp?.processIdentifier
         guard let pid else { return }
         AX.scroll(pid: pid, down: !pageUp)
+        // Debounce: rescan only once scrolling has stopped for 1s (handles rapid repeats).
+        rescanWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.rescan() } }
+        rescanWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Settings.scrollRescanDelay, execute: work)
     }
 
     private func openPreferences() {
@@ -382,6 +387,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
     private func dismiss(restoreFocus: Bool) {
         guard window != nil else { return }
+        rescanWork?.cancel(); rescanWork = nil
         disableTap()
         if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
         window?.delegate = nil

@@ -20,13 +20,26 @@ enum Settings {
         get { d.string(forKey: "triggerLabel") ?? "Space" }
         set { d.set(newValue, forKey: "triggerLabel") }
     }
-    /// Roles shown while ⌘ is held (compact mode). Default: in-window command controls.
+    /// Seconds to wait after scrolling stops before re-scanning hints.
+    static var scrollRescanDelay: Double {
+        get { let v = d.double(forKey: "scrollRescanDelay"); return v > 0 ? v : 1.0 }
+        set { d.set(newValue, forKey: "scrollRescanDelay") }
+    }
+    /// Roles shown while ⌘ is held. Default: in-window command controls.
     static var cmdVisibleRoles: Set<String> {
         get {
             if let arr = d.array(forKey: "cmdVisibleRoles") as? [String] { return Set(arr) }
             return ["AXButton", "AXMenuButton", "AXPopUpButton", "AXTab"]
         }
         set { d.set(Array(newValue), forKey: "cmdVisibleRoles") }
+    }
+    /// Roles shown while ⌃ is held. Default: form fields.
+    static var ctrlVisibleRoles: Set<String> {
+        get {
+            if let arr = d.array(forKey: "ctrlVisibleRoles") as? [String] { return Set(arr) }
+            return ["AXTextField", "AXTextArea", "AXCheckBox", "AXRadioButton"]
+        }
+        set { d.set(Array(newValue), forKey: "ctrlVisibleRoles") }
     }
 
     static func triggerDisplay() -> String {
@@ -44,6 +57,7 @@ enum Settings {
 final class SettingsWindow: NSObject {
     private var window: NSWindow?
     private var hotkeyButton: NSButton?
+    private var delayLabel: NSTextField?
     private var recordMonitor: Any?
     private var recording = false
 
@@ -77,14 +91,24 @@ final class SettingsWindow: NSObject {
         stack.addArrangedSubview(caption("버튼을 누른 뒤 원하는 조합을 입력하세요."))
 
         stack.addArrangedSubview(spacer())
-        stack.addArrangedSubview(header("⌘ 누를 때 표시할 요소"))
-        let visible = Settings.cmdVisibleRoles
-        for (i, r) in roles.enumerated() {
-            let cb = NSButton(checkboxWithTitle: r.1, target: self, action: #selector(toggleRole(_:)))
-            cb.tag = i
-            cb.state = visible.contains(r.0) ? .on : .off
-            stack.addArrangedSubview(cb)
-        }
+        stack.addArrangedSubview(header("스크롤 후 재스캔 딜레이"))
+        let slider = NSSlider(value: Settings.scrollRescanDelay, minValue: 0.2, maxValue: 3.0,
+                              target: self, action: #selector(delayChanged(_:)))
+        slider.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        let dl = caption(String(format: "%.1f초", Settings.scrollRescanDelay))
+        delayLabel = dl
+        let row = NSStackView(views: [slider, dl])
+        row.orientation = .horizontal; row.spacing = 8
+        stack.addArrangedSubview(row)
+
+        stack.addArrangedSubview(spacer())
+        stack.addArrangedSubview(header("눌렀을 때 표시할 요소"))
+        let cols = NSStackView(views: [
+            roleColumn("⌘ (버튼)", Settings.cmdVisibleRoles, #selector(toggleCmdRole(_:))),
+            roleColumn("⌃ (입력폼)", Settings.ctrlVisibleRoles, #selector(toggleCtrlRole(_:))),
+        ])
+        cols.orientation = .horizontal; cols.alignment = .top; cols.spacing = 24
+        stack.addArrangedSubview(cols)
 
         let content = NSView()
         content.addSubview(stack)
@@ -95,7 +119,7 @@ final class SettingsWindow: NSObject {
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
 
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 520),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "shott 환경설정"
         w.contentView = content
@@ -115,11 +139,35 @@ final class SettingsWindow: NSObject {
         let v = NSView(); v.heightAnchor.constraint(equalToConstant: 8).isActive = true; return v
     }
 
-    @objc private func toggleRole(_ sender: NSButton) {
-        let role = roles[sender.tag].0
-        var s = Settings.cmdVisibleRoles
-        if sender.state == .on { s.insert(role) } else { s.remove(role) }
-        Settings.cmdVisibleRoles = s
+    @objc private func delayChanged(_ sender: NSSlider) {
+        let v = (sender.doubleValue * 10).rounded() / 10   // 0.1s steps
+        Settings.scrollRescanDelay = v
+        delayLabel?.stringValue = String(format: "%.1f초", v)
+    }
+
+    private func roleColumn(_ title: String, _ selected: Set<String>, _ action: Selector) -> NSView {
+        let col = NSStackView()
+        col.orientation = .vertical; col.alignment = .leading; col.spacing = 4
+        col.addArrangedSubview(header(title))
+        for (i, r) in roles.enumerated() {
+            let cb = NSButton(checkboxWithTitle: r.1, target: self, action: action)
+            cb.tag = i
+            cb.state = selected.contains(r.0) ? .on : .off
+            col.addArrangedSubview(cb)
+        }
+        return col
+    }
+
+    @objc private func toggleCmdRole(_ s: NSButton) {
+        var cur = Settings.cmdVisibleRoles
+        if s.state == .on { cur.insert(roles[s.tag].0) } else { cur.remove(roles[s.tag].0) }
+        Settings.cmdVisibleRoles = cur
+    }
+
+    @objc private func toggleCtrlRole(_ s: NSButton) {
+        var cur = Settings.ctrlVisibleRoles
+        if s.state == .on { cur.insert(roles[s.tag].0) } else { cur.remove(roles[s.tag].0) }
+        Settings.ctrlVisibleRoles = cur
     }
 
     @objc private func toggleRecord(_ sender: NSButton) {
