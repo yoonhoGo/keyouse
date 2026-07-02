@@ -8,6 +8,7 @@ struct Hit {
     let element: AXUIElement
     let pid: pid_t
     let role: String
+    let subrole: String
     let label: String
     let frame: CGRect   // AX/global coords: top-left origin
 }
@@ -55,13 +56,20 @@ enum AX {
             ?? role
     }
 
+    // Window chrome (traffic lights, full-screen) — actionable but pure clutter; never a target.
+    static let chromeSubroles: Set<String> = [
+        "AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton",
+    ]
+
     static func collect(_ e: AXUIElement, pid: pid_t, screen: CGRect, depth: Int, into hits: inout [Hit]) {
         if depth > 40 { return }   // ponytail: cap depth so a pathological tree can't hang the scan.
         let role = str(e, kAXRoleAttribute as String) ?? ""
-        if actionableRoles.contains(role),
+        let subrole = str(e, kAXSubroleAttribute as String) ?? ""
+        if actionableRoles.contains(role), !chromeSubroles.contains(subrole),
            let f = frame(of: e), f.width > 0, f.height > 0,
            screen.intersects(f) {
-            hits.append(Hit(element: e, pid: pid, role: role, label: label(of: e, role: role), frame: f))
+            hits.append(Hit(element: e, pid: pid, role: role, subrole: subrole,
+                            label: label(of: e, role: role), frame: f))
         }
         if let children = attr(e, kAXChildrenAttribute as String) as? [AXUIElement] {
             for c in children { collect(c, pid: pid, screen: screen, depth: depth + 1, into: &hits) }
@@ -128,6 +136,11 @@ enum AX {
     /// Bring a window to the front (its element handle stays valid regardless of focus).
     static func raise(_ window: AXUIElement) {
         AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    }
+
+    /// Move keyboard focus into an element (e.g. a text field).
+    static func focus(_ element: AXUIElement) {
+        AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     }
 
     private static func center(_ hit: Hit) -> CGPoint {

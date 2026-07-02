@@ -48,9 +48,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var pickerGlass: NSView?
     private var pickerView: WindowPickerView?
     private var cmdWasDown = false
-    private var buttonsOnly = false   // while ⌘ is held: restrict hints to buttons for faster jumps
-
-    private static let buttonRoles: Set<String> = ["AXButton", "AXMenuButton", "AXPopUpButton"]
+    private enum Filter { case none, controls, forms }
+    private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields
+    private static let formRoles: Set<String> = ["AXTextField", "AXTextArea", "AXCheckBox", "AXRadioButton"]
+    private lazy var settings = SettingsWindow()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
@@ -59,9 +60,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
             let keyCode = e.keyCode
-            let mods = e.modifierFlags.intersection([.command, .shift])
+            let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
             MainActor.assumeIsolated {
-                if keyCode == 49, mods == [.command, .shift] { self?.activate() }
+                if keyCode == Settings.triggerKeyCode, mods == Settings.triggerModifiers { self?.activate() }
             }
         }
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -118,7 +119,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] e in
             if e.type == .flagsChanged {
                 let cmd = e.modifierFlags.contains(.command)
-                MainActor.assumeIsolated { self?.setButtonsOnly(cmd) }
+                let ctrl = e.modifierFlags.contains(.control)
+                MainActor.assumeIsolated { self?.setFilter(cmd: cmd, ctrl: ctrl) }
                 return e
             }
             let keyCode = e.keyCode
@@ -186,14 +188,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     /// Returns true if consumed (false lets the keystroke reach the search field).
     private func handleKeyDown(keyCode: UInt16, chars: String?, mods: NSEvent.ModifierFlags) -> Bool {
         if mode == .windowPicker { handlePickerKey(keyCode: keyCode, chars: chars); return true }
+        if mods.contains(.command), keyCode == 43 { openPreferences(); return true }        // ⌘, settings
+        if mods.contains(.control), chars?.lowercased() == "i" { focusFirstInput(); return true } // ⌃I first input
         switch keyCode {
         case 53: dismiss(restoreFocus: true); return true
-        case 36: act(on: selected, rightClick: mods.contains(.control)); return true   // ⌃⏎ = right click
+        case 36: act(on: selected, rightClick: mods.contains(.shift)); return true      // ⇧⏎ = right click
         case 125: mods.contains(.shift) ? scrollSelected(pageUp: false) : move(1); return true
         case 126: mods.contains(.shift) ? scrollSelected(pageUp: true) : move(-1); return true
         default:
             if let ch = chars?.first, ch.isNumber, !mods.contains(.option) {
-                pushDigit(String(ch), rightClick: mods.contains(.control)); return true   // ⌃+숫자 = right click
+                pushDigit(String(ch), rightClick: mods.contains(.shift)); return true    // ⇧+숫자 = right click
             }
             return false
         }
@@ -219,17 +223,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private func refilter() {
         let query = panelView?.query ?? ""
         var base = query.isEmpty ? allHits : allHits.filter { $0.label.localizedCaseInsensitiveContains(query) }
-        if buttonsOnly { base = base.filter { Self.buttonRoles.contains($0.role) } }
+        switch filter {
+        case .none: break
+        case .controls: let v = Settings.cmdVisibleRoles; base = base.filter { v.contains($0.role) }
+        case .forms: base = base.filter { Self.formRoles.contains($0.role) }
+        }
         matches = base
         selected = min(selected, max(0, matches.count - 1))
         pushHighlights()
         panelView?.update(count: matches.count)
     }
 
-    // ⌘ held -> restrict hints to buttons (fewer, faster to reach); release -> restore.
-    private func setButtonsOnly(_ on: Bool) {
-        guard mode == .search, on != buttonsOnly else { return }
-        buttonsOnly = on
+    // Modifier-held filters: ⌘ -> controls, ⌃ -> form fields (input/radio/checkbox); none -> all.
+    private func setFilter(cmd: Bool, ctrl: Bool) {
+        let new: Filter = cmd ? .controls : (ctrl ? .forms : .none)
+        guard mode == .search, new != filter else { return }
+        filter = new
         hintBuffer = ""
         refilter()
     }
@@ -278,6 +287,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         AX.scroll(pid: pid, down: !pageUp)
     }
 
+    private func openPreferences() {
+        dismiss(restoreFocus: false)
+        settings.show()
+    }
+
+    // ⌃I: focus the first text input among the scanned elements, then get out of the way.
+    private func focusFirstInput() {
+        guard let target = allHits.first(where: { $0.role == "AXTextField" || $0.role == "AXTextArea" }) else { return }
+        dismiss(restoreFocus: false)
+        NSRunningApplication(processIdentifier: target.pid)?.activate()
+        AX.focus(target.element)
+    }
+
     // MARK: - window picker
 
     private func showWindowPicker() {
@@ -303,7 +325,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         pickerGlass = nil; pickerView = nil
         highlight?.isHidden = false
         mode = .search
-        buttonsOnly = false; refilter()
+        filter = .none; refilter()
     }
 
     private func moveWindowSel(_ delta: Int) {
@@ -350,7 +372,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         window?.orderOut(nil)
         window = nil; highlight = nil; panelView = nil; panelGlass = nil
         pickerGlass = nil; pickerView = nil; windows = []; mode = .search
-        allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false
+        allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none
         if restoreFocus { previousApp?.activate() }
         previousApp = nil
     }
