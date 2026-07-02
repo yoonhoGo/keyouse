@@ -2,8 +2,37 @@ import AppKit
 
 // Persisted preferences (UserDefaults) + a small settings window built programmatically.
 
+// Launch at login via a LaunchAgent plist (works for a bare executable, no app bundle needed).
+enum LoginItem {
+    private static let label = "com.shott.loginitem"
+    private static var plistURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+    }
+    static var isEnabled: Bool { FileManager.default.fileExists(atPath: plistURL.path) }
+    static func setEnabled(_ on: Bool) {
+        let fm = FileManager.default
+        if on {
+            guard let exe = Bundle.main.executablePath else { return }
+            try? fm.createDirectory(at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let plist: [String: Any] = ["Label": label, "ProgramArguments": [exe], "RunAtLoad": true]
+            if let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) {
+                try? data.write(to: plistURL)
+            }
+        } else {
+            try? fm.removeItem(at: plistURL)
+        }
+    }
+}
+
 enum Settings {
+    static let keys = ["triggerKeyCode", "triggerMods", "triggerLabel", "showGuide",
+                       "guideFontSize", "panelActiveOpacity", "scrollRescanDelay",
+                       "cmdVisibleRoles", "ctrlVisibleRoles"]
+
     private static var d: UserDefaults { .standard }
+
+    static func reset() { keys.forEach { d.removeObject(forKey: $0) } }
 
     static var triggerKeyCode: UInt16 {
         get { UInt16(d.object(forKey: "triggerKeyCode") as? Int ?? 49) }   // default: Space
@@ -108,6 +137,10 @@ final class SettingsWindow: NSObject {
         stack.addArrangedSubview(caption("버튼을 누른 뒤 원하는 조합을 입력하세요."))
 
         stack.addArrangedSubview(spacer())
+        let loginCB = NSButton(checkboxWithTitle: "로그인 시 시작", target: self, action: #selector(toggleLogin(_:)))
+        loginCB.state = LoginItem.isEnabled ? .on : .off
+        stack.addArrangedSubview(loginCB)
+
         let guideCB = NSButton(checkboxWithTitle: "단축키 가이드 표시", target: self, action: #selector(toggleGuide(_:)))
         guideCB.state = Settings.showGuide ? .on : .off
         stack.addArrangedSubview(guideCB)
@@ -151,6 +184,11 @@ final class SettingsWindow: NSObject {
         cols.orientation = .horizontal; cols.alignment = .top; cols.spacing = 24
         stack.addArrangedSubview(cols)
 
+        stack.addArrangedSubview(spacer())
+        let reset = NSButton(title: "기본값으로 리셋", target: self, action: #selector(resetDefaults))
+        reset.bezelStyle = .rounded
+        stack.addArrangedSubview(reset)
+
         let content = NSView()
         content.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -160,7 +198,7 @@ final class SettingsWindow: NSObject {
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
 
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 720),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "shott 환경설정"
         w.contentView = content
@@ -180,7 +218,21 @@ final class SettingsWindow: NSObject {
         let v = NSView(); v.heightAnchor.constraint(equalToConstant: 8).isActive = true; return v
     }
 
+    @objc private func toggleLogin(_ s: NSButton) { LoginItem.setEnabled(s.state == .on) }
+
     @objc private func toggleGuide(_ s: NSButton) { Settings.showGuide = (s.state == .on) }
+
+    @objc private func resetDefaults() {
+        let a = NSAlert()
+        a.messageText = "기본 설정으로 되돌릴까요?"
+        a.informativeText = "단축키·필터·가이드·로그인 시작 설정이 모두 초기화됩니다."
+        a.addButton(withTitle: "리셋")
+        a.addButton(withTitle: "취소")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        Settings.reset()
+        LoginItem.setEnabled(false)
+        window?.orderOut(nil); window = nil; show()   // rebuild UI with defaults
+    }
 
     private func opacityText(_ v: Double) -> String { v <= 0.01 ? "숨김" : String(format: "%.0f%%", v * 100) }
 
