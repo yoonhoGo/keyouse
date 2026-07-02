@@ -61,41 +61,58 @@ enum AX {
         "AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton",
     ]
 
-    static func collect(_ e: AXUIElement, pid: pid_t, screen: CGRect, depth: Int, into hits: inout [Hit]) {
+    static func collect(_ e: AXUIElement, pid: pid_t, screen: CGRect, depth: Int, expanded: Bool, into hits: inout [Hit]) {
         if depth > 40 { return }   // ponytail: cap depth so a pathological tree can't hang the scan.
         let role = str(e, kAXRoleAttribute as String) ?? ""
         let subrole = str(e, kAXSubroleAttribute as String) ?? ""
-        if actionableRoles.contains(role), !chromeSubroles.contains(subrole),
+        // Default scan is the role whitelist. Expanded scan (⌘A) also grabs anything with an AXPress
+        // action — web/Electron use non-button roles (Slack channels, table rows, clickable divs) that
+        // the whitelist misses. ponytail: actions() is an extra AX round-trip, so only fire it on the
+        // role miss and only when expanded; nested pressables may overlap, typing-to-filter absorbs it.
+        let pressable = actionableRoles.contains(role)
+            || (expanded && !role.isEmpty && actions(e).contains("AXPress"))
+        if pressable, !chromeSubroles.contains(subrole),
            let f = frame(of: e), f.width > 0, f.height > 0,
            screen.intersects(f) {
             hits.append(Hit(element: e, pid: pid, role: role, subrole: subrole,
                             label: label(of: e, role: role), frame: f))
         }
         if let children = attr(e, kAXChildrenAttribute as String) as? [AXUIElement] {
-            for c in children { collect(c, pid: pid, screen: screen, depth: depth + 1, into: &hits) }
+            for c in children { collect(c, pid: pid, screen: screen, depth: depth + 1, expanded: expanded, into: &hits) }
         }
     }
 
-    // Always-available targets: the menu bar's neighbours — Dock and menu-bar extras.
+    // Always-available targets: the menu bar's neighbours — Dock and menu-bar extras. Native roles,
+    // so expanded doesn't apply.
     private static func collectExtras(screen: CGRect, into hits: inout [Hit]) {
         let extras = ["com.apple.dock", "com.apple.controlcenter", "com.apple.systemuiserver"]
         for ra in NSWorkspace.shared.runningApplications
         where ra.bundleIdentifier.map(extras.contains) == true {
             collect(AXUIElementCreateApplication(ra.processIdentifier), pid: ra.processIdentifier,
-                    screen: screen, depth: 0, into: &hits)
+                    screen: screen, depth: 0, expanded: false, into: &hits)
         }
+    }
+
+    /// Chromium (Chrome/Electron/Edge/Slack…) and Firefox don't build their web-content AX tree
+    /// until an assistive tech asks. Setting these attributes triggers it; harmless on AppKit apps.
+    /// ponytail: fire-and-forget. If Chrome's first scan still comes back empty, the tree builds
+    /// async — prewarm on app activation instead of adding a retry here.
+    static func enableWebA11y(_ app: AXUIElement) {
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
     }
 
     /// Clickable elements across the target app (default: frontmost), its menu bar, and the
     /// Dock / menu extras.
-    static func scan(screen: CGRect, frontApp: NSRunningApplication? = nil) -> [Hit] {
+    static func scan(screen: CGRect, frontApp: NSRunningApplication? = nil, expanded: Bool = false) -> [Hit] {
         var hits: [Hit] = []
         if let front = frontApp ?? NSWorkspace.shared.frontmostApplication {
             let pid = front.processIdentifier
             let app = AXUIElementCreateApplication(pid)
-            collect(app, pid: pid, screen: screen, depth: 0, into: &hits)
+            enableWebA11y(app)
+            collect(app, pid: pid, screen: screen, depth: 0, expanded: expanded, into: &hits)
             if let mb = attr(app, kAXMenuBarAttribute as String) {
-                collect(mb as! AXUIElement, pid: pid, screen: screen, depth: 0, into: &hits)
+                collect(mb as! AXUIElement, pid: pid, screen: screen, depth: 0, expanded: expanded, into: &hits)
             }
         }
         collectExtras(screen: screen, into: &hits)
@@ -103,12 +120,13 @@ enum AX {
     }
 
     /// Clickable elements of one specific window, plus its app's menu bar and the Dock / extras.
-    static func scanWindow(_ window: AXUIElement, appPid: pid_t, screen: CGRect) -> [Hit] {
+    static func scanWindow(_ window: AXUIElement, appPid: pid_t, screen: CGRect, expanded: Bool = false) -> [Hit] {
         var hits: [Hit] = []
-        collect(window, pid: appPid, screen: screen, depth: 0, into: &hits)
         let app = AXUIElementCreateApplication(appPid)
+        enableWebA11y(app)
+        collect(window, pid: appPid, screen: screen, depth: 0, expanded: expanded, into: &hits)
         if let mb = attr(app, kAXMenuBarAttribute as String) {
-            collect(mb as! AXUIElement, pid: appPid, screen: screen, depth: 0, into: &hits)
+            collect(mb as! AXUIElement, pid: appPid, screen: screen, depth: 0, expanded: expanded, into: &hits)
         }
         collectExtras(screen: screen, into: &hits)
         return hits

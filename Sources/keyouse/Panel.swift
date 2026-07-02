@@ -26,6 +26,7 @@ final class PanelView: NSView {
             (L.t("Window · Misc", "창 · 기타"), [
                 ("⌘Tab", L.t("switch window", "창 전환")),
                 ("⌘R", L.t("rescan", "새로고침")),
+                ("⌘A", L.t("expand scan", "확장 스캔")),
                 ("⌘,", L.t("settings", "설정")),
                 ("esc", L.t("cancel", "취소")),
             ]),

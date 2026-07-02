@@ -57,6 +57,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private enum Filter { case none, controls, forms, links }
     private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields, ⌘L -> links (sticky)
     private var sticky = false            // true when filter is a toggle (⌘L), not a held modifier
+    private var expanded = false          // ⌘A: also collect AXPress-actionable elements (web/Electron)
     private lazy var settings: SettingsWindow = {
         let s = SettingsWindow()
         s.onLanguageChange = { [weak self] in self?.rebuildStatusMenu() }
@@ -125,7 +126,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         guard let screen = primaryScreen else { return }
         previousApp = NSWorkspace.shared.frontmostApplication
         targetWindow = nil
-        let hits = AX.scan(screen: screen.frame)
+        expanded = false
+        let hits = AX.scan(screen: screen.frame, expanded: expanded)
         guard !hits.isEmpty else { return }
         allHits = hits; matches = hits; selected = 0; hintBuffer = ""; mode = .search; cmdWasDown = false
 
@@ -244,6 +246,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if mode == .windowPicker { handlePickerKey(keyCode: keyCode, chars: chars); return true }
         if mods.contains(.command), keyCode == 43 { openPreferences(); return true }        // ⌘, settings
         if mods.contains(.command), keyCode == 15 { rescan(); return true }                 // ⌘R rescan
+        if mods.contains(.command), keyCode == 0 { expanded.toggle(); rescan(); return true } // ⌘A expand scan
         if mods.contains(.command), keyCode == 37 { toggleLinksFilter(); return true }      // ⌘L links
         if mods.contains(.control), chars?.lowercased() == "i" { focusFirstInput(); return true } // ⌃I first input
         switch keyCode {
@@ -394,9 +397,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private func rescan() {
         guard window != nil, let screen = primaryScreen else { return }
         if let win = targetWindow, let pid = previousApp?.processIdentifier {
-            allHits = AX.scanWindow(win, appPid: pid, screen: screen.frame)
+            allHits = AX.scanWindow(win, appPid: pid, screen: screen.frame, expanded: expanded)
         } else {
-            allHits = AX.scan(screen: screen.frame, frontApp: previousApp)
+            allHits = AX.scan(screen: screen.frame, frontApp: previousApp, expanded: expanded)
         }
         selected = 0; hintBuffer = ""
         refilter()
@@ -455,7 +458,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         targetWindow = entry.element
         AX.raise(entry.element)
         previousApp?.activate()
-        allHits = AX.scanWindow(entry.element, appPid: entry.pid, screen: screen.frame)
+        expanded = false
+        allHits = AX.scanWindow(entry.element, appPid: entry.pid, screen: screen.frame, expanded: expanded)
         matches = allHits; selected = 0; hintBuffer = ""
         panelView?.field.stringValue = ""
         refilter()
@@ -485,7 +489,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         window?.orderOut(nil)
         window = nil; highlight = nil; panelView = nil; panelGlass = nil
         pickerGlass = nil; pickerView = nil; windows = []; mode = .search
-        allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none; sticky = false; modActive = false
+        allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none; sticky = false; expanded = false; modActive = false
         if restoreFocus { previousApp?.activate() }
         previousApp = nil; targetWindow = nil
     }
