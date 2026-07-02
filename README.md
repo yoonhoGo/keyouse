@@ -15,10 +15,13 @@ Swift + AppKit, built on the macOS Accessibility API (`AXUIElement`). Ships as a
 ## Install
 
 ```bash
+xcode-select --install                    # if you don't have the Command Line Tools yet
 brew install yoonhoGo/tap/keyouse
 ```
 
-Built from source on install (no code signing needed — Gatekeeper doesn't block a locally built binary). Requires Xcode Command Line Tools.
+Built from source on install (no code signing needed — Gatekeeper doesn't block a locally built binary; `swift build` ad-hoc signs it). If Homebrew asks you to trust the tap, follow its prompt (`brew trust --formula yoonhoGo/tap/keyouse`).
+
+Then grant **Accessibility** permission (System Settings › Privacy & Security › Accessibility) and run `keyouse`.
 
 ## Build / run from source
 
@@ -78,3 +81,16 @@ swift build -c release      # → .build/release/keyouse
 ```
 
 See `CLAUDE.md` for architecture.
+
+## Releasing (maintainers)
+
+Distribution is a **Homebrew tap** ([yoonhoGo/homebrew-tap](https://github.com/yoonhoGo/homebrew-tap)) whose formula builds from source, so no Apple Developer account, code signing, or notarization is involved.
+
+Cutting a release is automated by `.github/workflows/release.yml` — push a tag and it creates the GitHub release and bumps the tap formula (`url` + `sha256`):
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+One-time setup: the workflow needs a Personal Access Token with write access to the tap repo, stored as the repo secret **`TAP_GITHUB_TOKEN`** (the default `GITHUB_TOKEN` can't push to another repo).
+

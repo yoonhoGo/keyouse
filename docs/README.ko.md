@@ -12,15 +12,24 @@ English: [../README.md](../README.md)
 - Swift 6 툴체인 (Xcode.app은 불필요, Command Line Tools면 됨)
 - **손쉬운 사용(Accessibility)** 권한 필수. `⌘Tab` 창 전환을 쓰려면 **입력 모니터링(Input Monitoring)** 권한도 필요할 수 있음.
 
-## 설치 / 실행
+## 설치
+
+```bash
+xcode-select --install                    # Command Line Tools 없으면 먼저
+brew install yoonhoGo/tap/keyouse
+```
+
+설치 시 소스에서 빌드된다(서명 불필요 — 로컬 빌드는 Gatekeeper가 막지 않고 `swift build`가 ad-hoc 서명). Homebrew가 tap 신뢰를 물으면 안내대로 진행(`brew trust --formula yoonhoGo/tap/keyouse`).
+
+이후 **손쉬운 사용** 권한(시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용) 부여 후 `keyouse` 실행.
+
+## 소스에서 빌드/실행
 
 ```bash
 make run          # 릴리스 빌드 후 실행 (터미널은 즉시 반환됨)
-make install      # /usr/local/bin/keyouse 로 설치 (sudo) → 어디서나 `keyouse`
+make install      # /usr/local/bin/keyouse 로 설치 (sudo)
 make uninstall
 ```
-
-첫 실행 시 권한 요청 → **시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용**에서 실행 주체(터미널 또는 keyouse)를 허용하고 다시 실행.
 
 실행하면 메뉴바에 아이콘이 생기고, 터미널에서 띄워도 프로세스가 분리되어(detach) 프롬프트가 바로 돌아온다. 여러 번 실행해도 인스턴스는 하나만 유지된다. 종료는 메뉴바 › 종료 또는 `pkill -f keyouse`.
 

@@ -39,6 +39,13 @@ make install / uninstall      # /usr/local/bin/keyouse (sudo)
 - **Entry point.** Without `KEYOUSE_DETACHED`, it relaunches itself as a child and the parent `exit(0)`s (terminal returns). The child `setsid()`s and takes an exclusive `flock` on `${TMPDIR}keyouse.lock` for single-instance.
 - **Permissions.** Accessibility required. If `CGEventTap` creation fails it only logs and continues (⌘Tab disabled).
 
+## Distribution / release
+
+- Distributed via a **Homebrew tap** (`yoonhoGo/homebrew-tap`, `Formula/keyouse.rb`) that **builds from source**. No app bundle, no signing/notarization, no Apple Developer account — a locally built binary is ad-hoc signed by `swift build` and isn't quarantined, so Gatekeeper allows it. Mac App Store is impossible (sandbox forbids the Accessibility API / `CGEventTap`).
+- The formula has **no `depends_on xcode`** — it builds with the Command Line Tools' `swift` (`swift build -c release --disable-sandbox`).
+- `packaging/keyouse.rb` is the reference copy of the formula in this repo.
+- **Release automation**: `.github/workflows/release.yml` runs on `v*` tag push — creates the GitHub release and rewrites the tap formula's `url`/`sha256`. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z`. Requires repo secret **`TAP_GITHUB_TOKEN`** (PAT with write access to the tap; default `GITHUB_TOKEN` can't push cross-repo). The workflow only uses built-in env (`$GITHUB_REF_NAME`) and a computed sha in `run:` — no untrusted `${{ }}` interpolation.
+
 ## Code style
 
 - Match surrounding tone when editing. Mark deliberate simplifications with a `ponytail:` comment stating the reason/ceiling (see existing examples).
