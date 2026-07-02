@@ -50,8 +50,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var pickerGlass: NSView?
     private var pickerView: WindowPickerView?
     private var cmdWasDown = false
-    private enum Filter { case none, controls, forms }
-    private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields
+    private enum Filter { case none, controls, forms, links }
+    private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields, ⌘L -> links (sticky)
+    private var sticky = false            // true when filter is a toggle (⌘L), not a held modifier
     private lazy var settings = SettingsWindow()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -192,6 +193,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if mode == .windowPicker { handlePickerKey(keyCode: keyCode, chars: chars); return true }
         if mods.contains(.command), keyCode == 43 { openPreferences(); return true }        // ⌘, settings
         if mods.contains(.command), keyCode == 15 { rescan(); return true }                 // ⌘R rescan
+        if mods.contains(.command), keyCode == 37 { toggleLinksFilter(); return true }      // ⌘L links
         if mods.contains(.control), chars?.lowercased() == "i" { focusFirstInput(); return true } // ⌃I first input
         switch keyCode {
         case 53: dismiss(restoreFocus: true); return true
@@ -230,6 +232,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         case .none: break
         case .controls: let v = Settings.cmdVisibleRoles; base = base.filter { v.contains($0.role) }
         case .forms: let v = Settings.ctrlVisibleRoles; base = base.filter { v.contains($0.role) }
+        case .links: base = base.filter { $0.role == "AXLink" }
         }
         matches = base
         selected = min(selected, max(0, matches.count - 1))
@@ -237,13 +240,30 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         panelView?.update(count: matches.count)
     }
 
-    // Modifier-held filters: ⌘ -> controls, ⌃ -> form fields (input/radio/checkbox); none -> all.
+    // Modifier-held filters: ⌘ -> controls, ⌃ -> form fields; none -> all. Ignored while a sticky
+    // toggle (⌘L links) is active so releasing the modifier doesn't clobber it.
     private func setFilter(cmd: Bool, ctrl: Bool) {
-        let new: Filter = cmd ? .controls : (ctrl ? .forms : .none)
+        guard !sticky else { return }
+        apply(cmd ? .controls : (ctrl ? .forms : .none))
+    }
+
+    private func apply(_ new: Filter) {
         guard mode == .search, new != filter else { return }
         filter = new
         hintBuffer = ""
         refilter()
+    }
+
+    // ⌘L: toggle a sticky links-only filter (persists after ⌘ is released).
+    private func toggleLinksFilter() {
+        if sticky, filter == .links {
+            sticky = false
+            let f = NSEvent.modifierFlags
+            apply(f.contains(.command) ? .controls : (f.contains(.control) ? .forms : .none))
+        } else {
+            sticky = true
+            filter = .links; hintBuffer = ""; refilter()
+        }
     }
 
     private func pushHighlights() {
@@ -345,7 +365,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         pickerGlass = nil; pickerView = nil
         highlight?.isHidden = false
         mode = .search
-        filter = .none; refilter()
+        filter = .none; sticky = false; refilter()
     }
 
     private func moveWindowSel(_ delta: Int) {
@@ -394,7 +414,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         window?.orderOut(nil)
         window = nil; highlight = nil; panelView = nil; panelGlass = nil
         pickerGlass = nil; pickerView = nil; windows = []; mode = .search
-        allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none
+        allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none; sticky = false
         if restoreFocus { previousApp?.activate() }
         previousApp = nil; targetWindow = nil
     }
