@@ -107,17 +107,38 @@ enum AX {
         }
     }
 
-    /// Scroll the given app's focused window: warp the cursor to its center (so the wheel event
-    /// lands on the content), then deliver the event straight to that process.
-    /// ponytail: postToPid + warp is what reaches a non-frontmost window reliably.
-    static func scroll(pid: pid_t, lines: Int32) {
-        let axApp = AXUIElementCreateApplication(pid)
-        if let win = attr(axApp, kAXFocusedWindowAttribute as String)
-            ?? attr(axApp, kAXMainWindowAttribute as String),
-           let f = frame(of: win as! AXUIElement) {
-            CGWarpMouseCursorPosition(CGPoint(x: f.midX, y: f.midY))
+    /// Largest AXScrollArea within an element (Vimac's approach). Skips AXWebArea (web content has
+    /// no scroll-area child but scrolls fine via the wheel), and doesn't descend into scroll areas.
+    static func largestScrollArea(_ root: AXUIElement) -> AXUIElement? {
+        var best: AXUIElement?
+        var bestArea: CGFloat = 0
+        var stack = [root]
+        var count = 0
+        while let e = stack.popLast(), count < 5000 {
+            count += 1
+            let role = str(e, kAXRoleAttribute as String) ?? ""
+            if role == "AXScrollArea" {
+                if let f = frame(of: e), f.width * f.height > bestArea { bestArea = f.width * f.height; best = e }
+                continue
+            }
+            if role == "AXWebArea" { continue }
+            if let children = attr(e, kAXChildrenAttribute as String) as? [AXUIElement] { stack.append(contentsOf: children) }
         }
-        CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1,
-                wheel1: lines, wheel2: 0, wheel3: 0)?.postToPid(pid)
+        return best
+    }
+
+    /// Scroll the app's focused window: find its scroll area, warp the cursor to its center, and
+    /// post a wheel event to the HID tap — which scrolls whatever is under the cursor (Vimac's way).
+    static func scroll(pid: pid_t, down: Bool) {
+        let axApp = AXUIElementCreateApplication(pid)
+        guard let winObj = attr(axApp, kAXFocusedWindowAttribute as String)
+            ?? attr(axApp, kAXMainWindowAttribute as String) else { return }
+        let win = winObj as! AXUIElement
+        let target = largestScrollArea(win) ?? win
+        guard let f = frame(of: target) else { return }
+        CGWarpMouseCursorPosition(CGPoint(x: f.midX, y: f.midY))
+        let amount = Int32(f.height / 3)                 // ~a third of the visible area per press
+        CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                wheel1: down ? -amount : amount, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
     }
 }

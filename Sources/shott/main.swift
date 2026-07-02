@@ -139,8 +139,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         switch keyCode {
         case 53: dismiss(restoreFocus: true)                                   // Esc
         case 36: act(on: selected, rightClick: mods.contains(.command))        // Return
-        case 125: mods.contains(.shift) ? scrollSelected(lines: -3) : move(1)    // Down / ⇧Down scroll
-        case 126: mods.contains(.shift) ? scrollSelected(lines: 3) : move(-1)    // Up / ⇧Up scroll
+        case 125: mods.contains(.shift) ? scrollSelected(pageUp: false) : move(1)   // Down / ⇧Down scroll
+        case 126: mods.contains(.shift) ? scrollSelected(pageUp: true) : move(-1)   // Up / ⇧Up scroll
         default: break
         }
     }
@@ -160,10 +160,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         highlight?.needsDisplay = true
     }
 
-    private func scrollSelected(lines: Int32) {
+    private func scrollSelected(pageUp: Bool) {
         let pid = matches.indices.contains(selected) ? matches[selected].pid : previousApp?.processIdentifier
         guard let pid else { return }
-        AX.scroll(pid: pid, lines: lines)
+        AX.scroll(pid: pid, down: !pageUp)
     }
 
     // Auto-dismiss when the panel loses focus (Spotlight-style).
