@@ -375,7 +375,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             if o <= 0.01 { glass.isHidden = true }
             else { glass.isHidden = false; glass.alphaValue = o }
         } else {
+            let wasHidden = glass.isHidden
             glass.isHidden = false; glass.alphaValue = 1
+            // Hiding the glass drops the search field's first-responder status; restore it on reveal
+            // so typing-to-filter keeps working after a modifier press.
+            if wasHidden, let f = panelView?.field { window?.makeFirstResponder(f) }
         }
     }
 
