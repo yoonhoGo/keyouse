@@ -1,0 +1,24 @@
+name: formula-check
+
+# Validate packaging/keyouse.rb actually loads and lints — catches errors like a Cask-only
+# stanza in a Formula (undefined method), which `brew style` alone (static) misses.
+on:
+  push:
+    paths: ["packaging/keyouse.rb", ".github/workflows/formula-check.yml"]
+  pull_request:
+    paths: ["packaging/keyouse.rb"]
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint & load formula
+        run: |
+          tap="$(brew --repository)/Library/Taps/keyouse/homebrew-check"
+          mkdir -p "$tap/Formula"
+          cp packaging/keyouse.rb "$tap/Formula/keyouse.rb"
+          brew readall keyouse/check                       # loads (evaluates) the Ruby — the key check
+          brew style "$tap/Formula/keyouse.rb"             # rubocop style
+          brew audit --formula keyouse/check/keyouse || true   # extra checks, informational
