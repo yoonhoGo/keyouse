@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "shott",
+    name: "keyouse",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "shott", path: "Sources/shott")
+        .executableTarget(name: "keyouse", path: "Sources/keyouse")
     ]
 )

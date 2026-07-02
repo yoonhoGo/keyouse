@@ -4,7 +4,7 @@ import AppKit
 
 // Launch at login via a LaunchAgent plist (works for a bare executable, no app bundle needed).
 enum LoginItem {
-    private static let label = "com.shott.loginitem"
+    private static let label = "com.keyouse.loginitem"
     private static var plistURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(label).plist")
@@ -200,7 +200,7 @@ final class SettingsWindow: NSObject {
 
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        w.title = "shott 환경설정"
+        w.title = "keyouse 환경설정"
         w.contentView = content
         w.center()
         w.isReleasedWhenClosed = false

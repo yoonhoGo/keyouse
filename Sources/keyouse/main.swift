@@ -2,12 +2,12 @@ import AppKit
 import ApplicationServices
 import Darwin
 
-// shott — hotkey -> Liquid Glass search panel -> filter by label / pick by number -> act.
-// Trigger: ⌘⇧Space. While open, ⌘Tab drives shott's own window picker (a CGEventTap steals
+// keyouse — hotkey -> Liquid Glass search panel -> filter by label / pick by number -> act.
+// Trigger: ⌘⇧Space. While open, ⌘Tab drives keyouse's own window picker (a CGEventTap steals
 // ⌘Tab from the system switcher); hold ⌘ and Tab / ⇧Tab / arrows to move, release ⌘ to choose.
 
 // CGEventTap callback (top-level, C-compatible). Delegates to the controller on the main actor.
-private func shottEventTapCallback(_ proxy: CGEventTapProxy, _ type: CGEventType,
+private func keyouseEventTapCallback(_ proxy: CGEventTapProxy, _ type: CGEventType,
                                    _ event: CGEvent, _ userInfo: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     guard let userInfo else { return Unmanaged.passUnretained(event) }
     let controller = Unmanaged<AppController>.fromOpaque(userInfo).takeUnretainedValue()
@@ -79,12 +79,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             MainActor.assumeIsolated { self?.onAppActivated(pid: pid) }
         }
         setupStatusItem()
-        print("shott 준비됨. ⌘⇧Space 로 검색 패널을 여세요.")
+        print("keyouse 준비됨. ⌘⇧Space 로 검색 패널을 여세요.")
     }
 
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let img = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "shott") {
+        if let img = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "keyouse") {
             item.button?.image = img
         } else {
             item.button?.title = "S"
@@ -184,7 +184,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                                           options: .defaultTap, eventsOfInterest: CGEventMask(mask),
-                                          callback: shottEventTapCallback, userInfo: selfPtr) else {
+                                          callback: keyouseEventTapCallback, userInfo: selfPtr) else {
             print("⌘Tab 창전환용 이벤트 탭 생성 실패 — 입력 모니터링/손쉬운 사용 권한을 확인하세요.")
             return
         }
@@ -482,24 +482,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 }
 
 // Detach from the terminal: re-launch a copy in its own session and let the parent exit,
-// so `shott` from a shell returns the prompt immediately while the app keeps running.
-if ProcessInfo.processInfo.environment["SHOTT_DETACHED"] == nil {
+// so `keyouse` from a shell returns the prompt immediately while the app keeps running.
+if ProcessInfo.processInfo.environment["KEYOUSE_DETACHED"] == nil {
     let child = Process()
     child.executableURL = URL(fileURLWithPath: Bundle.main.executablePath ?? CommandLine.arguments[0])
     var env = ProcessInfo.processInfo.environment
-    env["SHOTT_DETACHED"] = "1"
+    env["KEYOUSE_DETACHED"] = "1"
     child.environment = env
     child.standardOutput = FileHandle.nullDevice
     child.standardError = FileHandle.nullDevice
     child.standardInput = FileHandle.nullDevice
-    do { try child.run() } catch { fputs("shott 실행 실패: \(error)\n", stderr) }
+    do { try child.run() } catch { fputs("keyouse 실행 실패: \(error)\n", stderr) }
     exit(0)
 }
 setsid()   // new session, no controlling terminal -> survives the shell closing
 
 // Single instance: hold an exclusive lock for our lifetime; a second launch can't get it and exits.
 // (fd is intentionally kept open — the lock releases automatically when the process ends.)
-let lockFD = open("\(NSTemporaryDirectory())shott.lock", O_CREAT | O_RDWR, 0o644)
+let lockFD = open("\(NSTemporaryDirectory())keyouse.lock", O_CREAT | O_RDWR, 0o644)
 if lockFD < 0 || flock(lockFD, LOCK_EX | LOCK_NB) != 0 { exit(0) }
 
 let app = NSApplication.shared
