@@ -57,12 +57,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private enum Filter { case none, controls, forms, links }
     private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields, ⌘L -> links (sticky)
     private var sticky = false            // true when filter is a toggle (⌘L), not a held modifier
-    private lazy var settings = SettingsWindow()
+    private lazy var settings: SettingsWindow = {
+        let s = SettingsWindow()
+        s.onLanguageChange = { [weak self] in self?.rebuildStatusMenu() }
+        return s
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         if !AXIsProcessTrustedWithOptions(opts) {
-            print("접근성 권한을 켠 뒤 다시 실행하세요: 시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용")
+            print("Accessibility permission required: System Settings > Privacy & Security > Accessibility")
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
             let keyCode = e.keyCode
@@ -79,7 +83,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             MainActor.assumeIsolated { self?.onAppActivated(pid: pid) }
         }
         setupStatusItem()
-        print("keyouse 준비됨. ⌘⇧Space 로 검색 패널을 여세요.")
+        print("keyouse ready. Press ⌘⇧Space to open the search panel.")
     }
 
     private func setupStatusItem() {
@@ -87,19 +91,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if let img = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "keyouse") {
             item.button?.image = img
         } else {
-            item.button?.title = "S"
+            item.button?.title = "K"
         }
-        let menu = NSMenu()
-        menu.addItem(withTitle: "열기", action: #selector(menuOpen), keyEquivalent: "")
-        menu.addItem(withTitle: "닫기", action: #selector(menuClose), keyEquivalent: "")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "환경설정…", action: #selector(menuSettings), keyEquivalent: ",")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "종료", action: #selector(menuQuit), keyEquivalent: "q")
-        menu.items.forEach { $0.target = self }
-        item.menu = menu
+        item.menu = buildStatusMenu()
         statusItem = item
     }
+
+    private func buildStatusMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(withTitle: L.t("Open", "열기"), action: #selector(menuOpen), keyEquivalent: "")
+        menu.addItem(withTitle: L.t("Close", "닫기"), action: #selector(menuClose), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: L.t("Settings…", "환경설정…"), action: #selector(menuSettings), keyEquivalent: ",")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: L.t("Quit", "종료"), action: #selector(menuQuit), keyEquivalent: "q")
+        menu.items.forEach { $0.target = self }
+        return menu
+    }
+
+    func rebuildStatusMenu() { statusItem?.menu = buildStatusMenu() }
 
     @objc private func menuOpen() { activate() }
     @objc private func menuClose() { dismiss(restoreFocus: false) }
@@ -185,7 +195,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                                           options: .defaultTap, eventsOfInterest: CGEventMask(mask),
                                           callback: keyouseEventTapCallback, userInfo: selfPtr) else {
-            print("⌘Tab 창전환용 이벤트 탭 생성 실패 — 입력 모니터링/손쉬운 사용 권한을 확인하세요.")
+            print("Failed to create event tap for ⌘Tab — check Input Monitoring / Accessibility permission.")
             return
         }
         let src = CFMachPortCreateRunLoopSource(nil, tap, 0)
@@ -492,7 +502,7 @@ if ProcessInfo.processInfo.environment["KEYOUSE_DETACHED"] == nil {
     child.standardOutput = FileHandle.nullDevice
     child.standardError = FileHandle.nullDevice
     child.standardInput = FileHandle.nullDevice
-    do { try child.run() } catch { fputs("keyouse 실행 실패: \(error)\n", stderr) }
+    do { try child.run() } catch { fputs("keyouse launch failed: \(error)\n", stderr) }
     exit(0)
 }
 setsid()   // new session, no controlling terminal -> survives the shell closing

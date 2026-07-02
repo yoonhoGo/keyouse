@@ -1,69 +1,72 @@
 # keyouse
 
-macOS를 **키보드만으로** 제어하는 유틸리티. 단축키로 검색 패널을 띄우면 화면의 클릭 가능한 UI 요소에 숫자 힌트가 표시되고, 숫자를 눌러 클릭·우클릭·스크롤하거나 라벨로 검색해 이동한다. Shortcat / Homerow / Vimac 류의 접근성 기반 내비게이터.
+Control macOS **with the keyboard only**. A hotkey opens a search panel; every clickable UI element on screen gets a number hint. Press the number to click / right-click, or type a label to filter and jump. An accessibility-based navigator in the spirit of Shortcat / Homerow / Vimac.
 
-Swift + AppKit, macOS 접근성 API(`AXUIElement`) 기반. 앱 번들 없이 단일 실행 파일로 동작한다.
+Swift + AppKit, built on the macOS Accessibility API (`AXUIElement`). Ships as a single executable — no app bundle.
 
-## 요구 사항
+한국어 문서: [docs/README.ko.md](docs/README.ko.md)
 
-- macOS 13 이상 (Liquid Glass 패널은 macOS 26+의 `NSGlassEffectView`, 그 이하는 `NSVisualEffectView` 폴백)
-- Swift 6 툴체인 (Xcode.app은 불필요, Command Line Tools면 됨)
-- **손쉬운 사용(Accessibility)** 권한 필수. `⌘Tab` 창 전환을 쓰려면 **입력 모니터링(Input Monitoring)** 권한도 필요할 수 있음.
+## Requirements
 
-## 설치 / 실행
+- macOS 13+ (the Liquid Glass panel uses `NSGlassEffectView` on macOS 26+, falling back to `NSVisualEffectView` below)
+- Swift 6 toolchain (Command Line Tools is enough; Xcode.app not required)
+- **Accessibility** permission is required. Using `⌘Tab` window switching may also need **Input Monitoring**.
+
+## Install / run
 
 ```bash
-make run          # 릴리스 빌드 후 실행 (터미널은 즉시 반환됨)
-make install      # /usr/local/bin/keyouse 로 설치 (sudo) → 어디서나 `keyouse`
+make run          # build release and run (the terminal returns immediately)
+make install      # install to /usr/local/bin/keyouse (sudo) → run `keyouse` anywhere
 make uninstall
 ```
 
-첫 실행 시 권한 요청 → **시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용**에서 실행 주체(터미널 또는 keyouse)를 허용하고 다시 실행.
+On first launch, grant permission in **System Settings › Privacy & Security › Accessibility** to the running host (Terminal or keyouse), then run again.
 
-실행하면 메뉴바에 아이콘이 생기고, 터미널에서 띄워도 프로세스가 분리되어(detach) 프롬프트가 바로 돌아온다. 여러 번 실행해도 인스턴스는 하나만 유지된다. 종료는 메뉴바 › 종료 또는 `pkill -f keyouse`.
+A menu-bar icon appears. Launched from a terminal, the process detaches so the prompt returns right away; running it again keeps a single instance. Quit via the menu-bar icon or `pkill -f keyouse`.
 
-## 사용법
+## Usage
 
-기본 트리거 **`⌘⇧Space`** 로 검색 패널을 연다.
+Default trigger **`⌘⇧Space`** opens the search panel.
 
-| 키 | 동작 |
-|----|------|
-| 글자 입력 | 라벨로 요소 검색 (한글/IME 지원) |
-| `숫자` | 해당 힌트 요소 좌클릭 |
-| `⇧숫자` | 우클릭 |
-| `⏎` / `⇧⏎` | 선택 요소 좌클릭 / 우클릭 |
-| `↑` `↓` | 선택 이동 |
-| `⇧↑` `⇧↓` | 스크롤 (스크롤 영역의 1/3) |
-| `⌘` (누르는 동안) | 버튼류만 표시 |
-| `⌃` (누르는 동안) | 입력폼(텍스트·체크박스·라디오)만 표시 |
-| `⌘L` | 링크만 표시 (토글) |
-| `⌃I` | 첫 입력 필드로 포커스 |
-| `⌘Tab` | 창 피커 열기 · 다음 창 (`⇧⌘Tab` 이전, `⌘←→↑↓` 이동, `⌘` 떼면 선택) |
-| `⌘R` | 힌트 다시 스캔 |
-| `⌘,` | 환경설정 |
-| `esc` | 취소 |
+| Key | Action |
+|-----|--------|
+| type text | filter elements by label (IME/CJK supported) |
+| `num` | left-click that hinted element |
+| `⇧num` | right-click |
+| `⏎` / `⇧⏎` | left / right click the selected element |
+| `↑` `↓` | move selection |
+| `⇧↑` `⇧↓` | scroll (a third of the scroll area) |
+| `⌘` (while held) | show buttons only |
+| `⌃` (while held) | show form fields only (text / checkbox / radio) |
+| `⌘L` | links only (toggle) |
+| `⌃I` | focus the first input field |
+| `⌘Tab` | window picker · next (`⇧⌘Tab` prev, `⌘←→↑↓` move, release `⌘` to choose) |
+| `⌘R` | rescan hints |
+| `⌘,` | settings |
+| `esc` | cancel |
 
-- 앞 앱뿐 아니라 **메뉴바·Dock** 요소도 힌트 대상.
-- modifier를 누르거나 번호 입력 중에는 패널이 사라져(설정 가능) 대상을 가리지 않는다.
-- 스크롤 후에는 잠시 뒤 자동으로 다시 스캔한다.
-- 마우스로 다른 창을 클릭하면 패널이 닫힌다.
+- Menu-bar and Dock elements are hinted too, not just the front app.
+- While a modifier is held or a number is being entered, the panel gets out of the way (configurable).
+- After scrolling, hints are re-scanned shortly.
+- Clicking another window with the mouse dismisses the panel.
 
-## 환경설정 (`⌘,`)
+## Settings (`⌘,`)
 
-- **트리거 단축키** 녹화 변경
-- **로그인 시 시작** (LaunchAgent)
-- **단축키 가이드** 표시 여부 · 글자 크기
-- **입력 중 패널 불투명도** (0 = 숨김)
-- **스크롤 후 재스캔 딜레이**
-- **`⌘` / `⌃` 필터에 표시할 요소** (AX role 체크박스)
-- **기본값으로 리셋**
+- **Language** (English / 한국어)
+- **Trigger shortcut** (record a new combo)
+- **Start at login** (LaunchAgent)
+- **Shortcut guide** visibility and font size
+- **Panel opacity while typing** (0 = hidden)
+- **Rescan delay after scrolling**
+- **Roles shown for the `⌘` / `⌃` filters** (AX-role checkboxes)
+- **Reset to defaults**
 
-설정은 `UserDefaults`에 저장된다. 폰트·가이드 표시 여부는 다음에 패널을 열 때 적용된다.
+Settings persist in `UserDefaults`. Font/guide-visibility changes apply the next time the panel opens.
 
-## 소스에서 빌드
+## Build from source
 
 ```bash
 swift build -c release      # → .build/release/keyouse
 ```
 
-구조는 `CLAUDE.md` 참고.
+See `CLAUDE.md` for architecture.

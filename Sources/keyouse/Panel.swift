@@ -8,18 +8,29 @@ final class PanelView: NSView {
     private let countLabel = NSTextField(labelWithString: "")
 
     // Shortcut guide, grouped by purpose. Each group becomes a titled column.
-    private static let groups: [(String, [(String, String)])] = [
-        ("클릭 · 이동", [
-            ("숫자", "클릭"), ("⇧숫자", "우클릭"), ("⏎", "선택 클릭"),
-            ("↑↓", "선택 이동"), ("⇧↑↓", "스크롤"),
-        ]),
-        ("필터", [
-            ("⌘", "버튼만"), ("⌃", "입력폼만"), ("⌘L", "링크만"), ("⌃I", "첫 입력"),
-        ]),
-        ("창 · 기타", [
-            ("⌘Tab", "창 전환"), ("⌘R", "새로고침"), ("⌘,", "설정"), ("esc", "취소"),
-        ]),
-    ]
+    private static var groups: [(String, [(String, String)])] {
+        [
+            (L.t("Click · Move", "클릭 · 이동"), [
+                (L.t("num", "숫자"), L.t("click", "클릭")),
+                (L.t("⇧num", "⇧숫자"), L.t("right-click", "우클릭")),
+                ("⏎", L.t("click sel.", "선택 클릭")),
+                ("↑↓", L.t("move sel.", "선택 이동")),
+                ("⇧↑↓", L.t("scroll", "스크롤")),
+            ]),
+            (L.t("Filter", "필터"), [
+                ("⌘", L.t("buttons", "버튼만")),
+                ("⌃", L.t("form fields", "입력폼만")),
+                ("⌘L", L.t("links", "링크만")),
+                ("⌃I", L.t("first input", "첫 입력")),
+            ]),
+            (L.t("Window · Misc", "창 · 기타"), [
+                ("⌘Tab", L.t("switch window", "창 전환")),
+                ("⌘R", L.t("rescan", "새로고침")),
+                ("⌘,", L.t("settings", "설정")),
+                ("esc", L.t("cancel", "취소")),
+            ]),
+        ]
+    }
 
     init(showGuide: Bool) {
         super.init(frame: .zero)
@@ -31,7 +42,7 @@ final class PanelView: NSView {
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 24, weight: .regular)
         field.textColor = .labelColor
-        field.placeholderString = "요소 검색…"
+        field.placeholderString = L.t("Search elements…", "요소 검색…")
         field.cell?.wraps = false
         field.cell?.isScrollable = true
 
@@ -72,7 +83,7 @@ final class PanelView: NSView {
     /// Live query text including any in-progress IME composition (marked text).
     var query: String { field.currentEditor()?.string ?? field.stringValue }
 
-    func update(count: Int) { countLabel.stringValue = "\(count)개" }
+    func update(count: Int) { countLabel.stringValue = L.t("\(count)", "\(count)개") }
 
     // MARK: - guide
 

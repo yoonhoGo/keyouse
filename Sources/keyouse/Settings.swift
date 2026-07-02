@@ -28,7 +28,7 @@ enum LoginItem {
 enum Settings {
     static let keys = ["triggerKeyCode", "triggerMods", "triggerLabel", "showGuide",
                        "guideFontSize", "panelActiveOpacity", "scrollRescanDelay",
-                       "cmdVisibleRoles", "ctrlVisibleRoles"]
+                       "cmdVisibleRoles", "ctrlVisibleRoles", "language"]
 
     private static var d: UserDefaults { .standard }
 
@@ -106,14 +106,19 @@ final class SettingsWindow: NSObject {
     private var opacityLabel: NSTextField?
     private var recordMonitor: Any?
     private var recording = false
+    var onLanguageChange: (() -> Void)?
 
-    // (AX role, display name) — the roles offered as ⌘-mode filter checkboxes.
-    private let roles: [(String, String)] = [
-        ("AXButton", "버튼"), ("AXMenuButton", "메뉴 버튼"), ("AXPopUpButton", "팝업 버튼"),
-        ("AXTab", "탭"), ("AXCheckBox", "체크박스"), ("AXRadioButton", "라디오"),
-        ("AXLink", "링크"), ("AXTextField", "텍스트 필드"), ("AXTextArea", "텍스트 영역"),
-        ("AXMenuItem", "메뉴 항목"), ("AXMenuBarItem", "메뉴바 항목"), ("AXDockItem", "Dock 아이콘"),
-    ]
+    // (AX role, display name) — the roles offered as filter checkboxes.
+    private var roles: [(String, String)] {
+        [
+            ("AXButton", L.t("Button", "버튼")), ("AXMenuButton", L.t("Menu button", "메뉴 버튼")),
+            ("AXPopUpButton", L.t("Pop-up button", "팝업 버튼")), ("AXTab", L.t("Tab", "탭")),
+            ("AXCheckBox", L.t("Checkbox", "체크박스")), ("AXRadioButton", L.t("Radio", "라디오")),
+            ("AXLink", L.t("Link", "링크")), ("AXTextField", L.t("Text field", "텍스트 필드")),
+            ("AXTextArea", L.t("Text area", "텍스트 영역")), ("AXMenuItem", L.t("Menu item", "메뉴 항목")),
+            ("AXMenuBarItem", L.t("Menu bar item", "메뉴바 항목")), ("AXDockItem", L.t("Dock item", "Dock 아이콘")),
+        ]
+    }
 
     func show() {
         if window == nil { build() }
@@ -129,24 +134,32 @@ final class SettingsWindow: NSObject {
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        stack.addArrangedSubview(header("패널 단축키"))
+        stack.addArrangedSubview(header(L.t("Language", "언어")))
+        let langPopup = NSPopUpButton()
+        langPopup.addItems(withTitles: ["English", "한국어"])
+        langPopup.selectItem(at: L.lang == .ko ? 1 : 0)
+        langPopup.target = self; langPopup.action = #selector(languageChanged(_:))
+        stack.addArrangedSubview(langPopup)
+
+        stack.addArrangedSubview(spacer())
+        stack.addArrangedSubview(header(L.t("Panel shortcut", "패널 단축키")))
         let hk = NSButton(title: Settings.triggerDisplay(), target: self, action: #selector(toggleRecord(_:)))
         hk.bezelStyle = .rounded
         hotkeyButton = hk
         stack.addArrangedSubview(hk)
-        stack.addArrangedSubview(caption("버튼을 누른 뒤 원하는 조합을 입력하세요."))
+        stack.addArrangedSubview(caption(L.t("Click the button, then press the combo.", "버튼을 누른 뒤 원하는 조합을 입력하세요.")))
 
         stack.addArrangedSubview(spacer())
-        let loginCB = NSButton(checkboxWithTitle: "로그인 시 시작", target: self, action: #selector(toggleLogin(_:)))
+        let loginCB = NSButton(checkboxWithTitle: L.t("Start at login", "로그인 시 시작"), target: self, action: #selector(toggleLogin(_:)))
         loginCB.state = LoginItem.isEnabled ? .on : .off
         stack.addArrangedSubview(loginCB)
 
-        let guideCB = NSButton(checkboxWithTitle: "단축키 가이드 표시", target: self, action: #selector(toggleGuide(_:)))
+        let guideCB = NSButton(checkboxWithTitle: L.t("Show shortcut guide", "단축키 가이드 표시"), target: self, action: #selector(toggleGuide(_:)))
         guideCB.state = Settings.showGuide ? .on : .off
         stack.addArrangedSubview(guideCB)
 
         stack.addArrangedSubview(spacer())
-        stack.addArrangedSubview(header("가이드 글자 크기"))
+        stack.addArrangedSubview(header(L.t("Guide font size", "가이드 글자 크기")))
         let fontSlider = NSSlider(value: Settings.guideFontSize, minValue: 10, maxValue: 20,
                                   target: self, action: #selector(fontChanged(_:)))
         fontSlider.widthAnchor.constraint(equalToConstant: 200).isActive = true
@@ -155,37 +168,38 @@ final class SettingsWindow: NSObject {
         stack.addArrangedSubview(fontRow)
 
         stack.addArrangedSubview(spacer())
-        stack.addArrangedSubview(header("입력 중 패널 불투명도"))
+        stack.addArrangedSubview(header(L.t("Panel opacity while typing", "입력 중 패널 불투명도")))
         let opSlider = NSSlider(value: Settings.panelActiveOpacity, minValue: 0.0, maxValue: 1.0,
                                 target: self, action: #selector(opacityChanged(_:)))
         opSlider.widthAnchor.constraint(equalToConstant: 200).isActive = true
         let ol = caption(opacityText(Settings.panelActiveOpacity)); opacityLabel = ol
         let opRow = NSStackView(views: [opSlider, ol]); opRow.spacing = 8
         stack.addArrangedSubview(opRow)
-        stack.addArrangedSubview(caption("modifier를 누르거나 번호 입력 시 패널 투명도 (0 = 숨김)."))
+        stack.addArrangedSubview(caption(L.t("Opacity while a modifier is held / entering a number (0 = hidden).",
+                                             "modifier를 누르거나 번호 입력 시 패널 투명도 (0 = 숨김).")))
 
         stack.addArrangedSubview(spacer())
-        stack.addArrangedSubview(header("스크롤 후 재스캔 딜레이"))
+        stack.addArrangedSubview(header(L.t("Rescan delay after scrolling", "스크롤 후 재스캔 딜레이")))
         let slider = NSSlider(value: Settings.scrollRescanDelay, minValue: 0.2, maxValue: 3.0,
                               target: self, action: #selector(delayChanged(_:)))
         slider.widthAnchor.constraint(equalToConstant: 200).isActive = true
-        let dl = caption(String(format: "%.1f초", Settings.scrollRescanDelay))
+        let dl = caption(delayText(Settings.scrollRescanDelay))
         delayLabel = dl
         let row = NSStackView(views: [slider, dl])
         row.orientation = .horizontal; row.spacing = 8
         stack.addArrangedSubview(row)
 
         stack.addArrangedSubview(spacer())
-        stack.addArrangedSubview(header("눌렀을 때 표시할 요소"))
+        stack.addArrangedSubview(header(L.t("Roles to show when held", "눌렀을 때 표시할 요소")))
         let cols = NSStackView(views: [
-            roleColumn("⌘ (버튼)", Settings.cmdVisibleRoles, #selector(toggleCmdRole(_:))),
-            roleColumn("⌃ (입력폼)", Settings.ctrlVisibleRoles, #selector(toggleCtrlRole(_:))),
+            roleColumn(L.t("⌘ (buttons)", "⌘ (버튼)"), Settings.cmdVisibleRoles, #selector(toggleCmdRole(_:))),
+            roleColumn(L.t("⌃ (forms)", "⌃ (입력폼)"), Settings.ctrlVisibleRoles, #selector(toggleCtrlRole(_:))),
         ])
         cols.orientation = .horizontal; cols.alignment = .top; cols.spacing = 24
         stack.addArrangedSubview(cols)
 
         stack.addArrangedSubview(spacer())
-        let reset = NSButton(title: "기본값으로 리셋", target: self, action: #selector(resetDefaults))
+        let reset = NSButton(title: L.t("Reset to defaults", "기본값으로 리셋"), target: self, action: #selector(resetDefaults))
         reset.bezelStyle = .rounded
         stack.addArrangedSubview(reset)
 
@@ -200,7 +214,7 @@ final class SettingsWindow: NSObject {
 
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        w.title = "keyouse 환경설정"
+        w.title = L.t("keyouse Settings", "keyouse 환경설정")
         w.contentView = content
         w.center()
         w.isReleasedWhenClosed = false
@@ -222,19 +236,28 @@ final class SettingsWindow: NSObject {
 
     @objc private func toggleGuide(_ s: NSButton) { Settings.showGuide = (s.state == .on) }
 
+    @objc private func languageChanged(_ s: NSPopUpButton) {
+        L.lang = s.indexOfSelectedItem == 1 ? .ko : .en
+        onLanguageChange?()                            // refresh the status-bar menu
+        window?.orderOut(nil); window = nil; show()    // rebuild settings UI in the new language
+    }
+
     @objc private func resetDefaults() {
         let a = NSAlert()
-        a.messageText = "기본 설정으로 되돌릴까요?"
-        a.informativeText = "단축키·필터·가이드·로그인 시작 설정이 모두 초기화됩니다."
-        a.addButton(withTitle: "리셋")
-        a.addButton(withTitle: "취소")
+        a.messageText = L.t("Reset to default settings?", "기본 설정으로 되돌릴까요?")
+        a.informativeText = L.t("Shortcut, filters, guide, language and start-at-login will all be reset.",
+                                "단축키·필터·가이드·언어·로그인 시작 설정이 모두 초기화됩니다.")
+        a.addButton(withTitle: L.t("Reset", "리셋"))
+        a.addButton(withTitle: L.t("Cancel", "취소"))
         guard a.runModal() == .alertFirstButtonReturn else { return }
         Settings.reset()
         LoginItem.setEnabled(false)
+        onLanguageChange?()
         window?.orderOut(nil); window = nil; show()   // rebuild UI with defaults
     }
 
-    private func opacityText(_ v: Double) -> String { v <= 0.01 ? "숨김" : String(format: "%.0f%%", v * 100) }
+    private func opacityText(_ v: Double) -> String { v <= 0.01 ? L.t("Hidden", "숨김") : String(format: "%.0f%%", v * 100) }
+    private func delayText(_ v: Double) -> String { String(format: L.t("%.1fs", "%.1f초"), v) }
 
     @objc private func fontChanged(_ s: NSSlider) {
         let v = s.doubleValue.rounded()
@@ -251,7 +274,7 @@ final class SettingsWindow: NSObject {
     @objc private func delayChanged(_ sender: NSSlider) {
         let v = (sender.doubleValue * 10).rounded() / 10   // 0.1s steps
         Settings.scrollRescanDelay = v
-        delayLabel?.stringValue = String(format: "%.1f초", v)
+        delayLabel?.stringValue = delayText(v)
     }
 
     private func roleColumn(_ title: String, _ selected: Set<String>, _ action: Selector) -> NSView {
@@ -282,7 +305,7 @@ final class SettingsWindow: NSObject {
     @objc private func toggleRecord(_ sender: NSButton) {
         if recording { stopRecording(); return }
         recording = true
-        sender.title = "키 입력…"
+        sender.title = L.t("Press a key…", "키 입력…")
         recordMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             let keyCode = e.keyCode
             let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
