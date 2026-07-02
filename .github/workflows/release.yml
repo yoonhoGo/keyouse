@@ -1,6 +1,7 @@
 name: release
 
-# Push a tag like v0.2.0 to cut a release and bump the Homebrew tap formula.
+# Push a tag like v0.2.0 to build a universal prebuilt binary, publish a release with it,
+# and bump the Homebrew tap formula (url + sha256).
 on:
   push:
     tags: ["v*"]
@@ -10,25 +11,28 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest   # full Xcode -> can build a universal (arm64 + x86_64) binary
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create GitHub release
+      - name: Build universal binary
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          bin="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/keyouse"
+          mkdir -p dist && cp "$bin" dist/keyouse
+          tar -C dist -czf keyouse-macos.tar.gz keyouse
+          echo "sha=$(shasum -a 256 keyouse-macos.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+        id: build
+
+      - name: Create GitHub release with the binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --title "keyouse $GITHUB_REF_NAME" \
-            --notes "Install: \`brew install yoonhoGo/tap/keyouse\`" \
-            --repo "$GITHUB_REPOSITORY"
-
-      - name: Compute source tarball sha256
-        id: sha
-        run: |
-          url="https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$GITHUB_REF_NAME.tar.gz"
-          sha=$(curl -fsSL "$url" | shasum -a 256 | awk '{print $1}')
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+            --notes "Prebuilt install: \`brew install yoonhoGo/tap/keyouse\`" \
+            --repo "$GITHUB_REPOSITORY" \
+            keyouse-macos.tar.gz
 
       # Needs a PAT (repo scope) with write access to the tap, stored as secret TAP_GITHUB_TOKEN.
       - name: Checkout Homebrew tap
@@ -39,10 +43,14 @@ jobs:
           path: tap
 
       - name: Bump formula
+        env:
+          SHA: ${{ steps.build.outputs.sha }}
         run: |
           f=tap/Formula/keyouse.rb
-          sed -i -E "s#/tags/v[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz#/tags/$GITHUB_REF_NAME.tar.gz#" "$f"
-          sed -i -E "s#sha256 \"[a-f0-9]*\"#sha256 \"${{ steps.sha.outputs.sha }}\"#" "$f"
+          ver="${GITHUB_REF_NAME#v}"
+          sed -i -E "s#/download/v[0-9]+\.[0-9]+\.[0-9]+/#/download/$GITHUB_REF_NAME/#" "$f"
+          sed -i -E "s#sha256 \"[a-f0-9]*\"#sha256 \"$SHA\"#" "$f"
+          sed -i -E "s#version \"[0-9]+\.[0-9]+\.[0-9]+\"#version \"$ver\"#" "$f"
           git -C tap config user.name "github-actions[bot]"
           git -C tap config user.email "github-actions[bot]@users.noreply.github.com"
           git -C tap commit -am "keyouse $GITHUB_REF_NAME" && git -C tap push

@@ -41,10 +41,10 @@ make install / uninstall      # /usr/local/bin/keyouse (sudo)
 
 ## Distribution / release
 
-- Distributed via a **Homebrew tap** (`yoonhoGo/homebrew-tap`, `Formula/keyouse.rb`) that **builds from source**. No app bundle, no signing/notarization, no Apple Developer account — a locally built binary is ad-hoc signed by `swift build` and isn't quarantined, so Gatekeeper allows it. Mac App Store is impossible (sandbox forbids the Accessibility API / `CGEventTap`).
-- The formula has **no `depends_on xcode`** — it builds with the Command Line Tools' `swift` (`swift build -c release --disable-sandbox`).
-- `packaging/keyouse.rb` is the reference copy of the formula in this repo.
-- **Release automation**: `.github/workflows/release.yml` runs on `v*` tag push — creates the GitHub release and rewrites the tap formula's `url`/`sha256`. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z`. Requires repo secret **`TAP_GITHUB_TOKEN`** (PAT with write access to the tap; default `GITHUB_TOKEN` can't push cross-repo). The workflow only uses built-in env (`$GITHUB_REF_NAME`) and a computed sha in `run:` — no untrusted `${{ }}` interpolation.
+- Distributed via a **Homebrew tap** (`yoonhoGo/homebrew-tap`, `Formula/keyouse.rb`) that installs a **prebuilt universal binary** from the GitHub release (no build on the user's machine, no Xcode/CLT). No signing/notarization/Apple Developer — the binary is ad-hoc signed by `swift build` and formula downloads aren't quarantined, so Gatekeeper allows it. Mac App Store is impossible (sandbox forbids the Accessibility API / `CGEventTap`). `zap` is Cask-only — never put it in this Formula.
+- `packaging/keyouse.rb` is the reference copy of the formula. The universal binary is built with `swift build --arch arm64 --arch x86_64` (needs full Xcode → only on the CI runner; local CLT-only builds are native-arch).
+- **Release automation**: `.github/workflows/release.yml` runs on `v*` tag push (macos-latest) — builds the universal binary, publishes the release with `keyouse-macos.tar.gz`, and rewrites the tap formula's `url`/`sha256`/`version`. Cut a release with `git tag vX.Y.Z && git push origin vX.Y.Z`. Requires repo secret **`TAP_GITHUB_TOKEN`** (PAT with write access to the tap; default `GITHUB_TOKEN` can't push cross-repo). Uses only built-in env + computed sha in `run:` — no untrusted `${{ }}`.
+- **`formula-check.yml`**: on `packaging/keyouse.rb` change, `brew readall`/`style`/`audit` — `readall` actually loads the Ruby, catching errors `brew style` (static) misses (e.g. a Cask-only `zap` in a Formula).
 
 ## Code style
 

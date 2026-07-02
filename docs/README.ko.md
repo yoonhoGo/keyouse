@@ -9,17 +9,16 @@ English: [../README.md](../README.md)
 ## 요구 사항
 
 - macOS 13 이상 (Liquid Glass 패널은 macOS 26+의 `NSGlassEffectView`, 그 이하는 `NSVisualEffectView` 폴백)
-- Swift 6 툴체인 (Xcode.app은 불필요, Command Line Tools면 됨)
 - **손쉬운 사용(Accessibility)** 권한 필수. `⌘Tab` 창 전환을 쓰려면 **입력 모니터링(Input Monitoring)** 권한도 필요할 수 있음.
+- 설치엔 Xcode/툴체인 불필요 — 사전빌드 유니버설 바이너리를 내려받는다. (소스 빌드 시엔 Swift 6 CLT 필요.)
 
 ## 설치
 
 ```bash
-xcode-select --install                    # Command Line Tools 없으면 먼저
 brew install yoonhoGo/tap/keyouse
 ```
 
-설치 시 소스에서 빌드된다(서명 불필요 — 로컬 빌드는 Gatekeeper가 막지 않고 `swift build`가 ad-hoc 서명). Homebrew가 tap 신뢰를 물으면 안내대로 진행(`brew trust --formula yoonhoGo/tap/keyouse`).
+사전빌드 유니버설 바이너리를 설치한다 — 빌드·Xcode 불필요. 서명/공증 없음: `swift build`의 ad-hoc 서명 + Homebrew formula 다운로드는 격리되지 않아 Gatekeeper 통과. tap 신뢰를 물으면 안내대로(`brew trust --formula yoonhoGo/tap/keyouse`).
 
 이후 **손쉬운 사용** 권한(시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용) 부여 후 `keyouse` 실행.
 

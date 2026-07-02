@@ -9,17 +9,16 @@ Swift + AppKit, built on the macOS Accessibility API (`AXUIElement`). Ships as a
 ## Requirements
 
 - macOS 13+ (the Liquid Glass panel uses `NSGlassEffectView` on macOS 26+, falling back to `NSVisualEffectView` below)
-- Swift 6 toolchain (Command Line Tools is enough; Xcode.app not required)
-- **Accessibility** permission is required. Using `⌘Tab` window switching may also need **Input Monitoring**.
+- **Accessibility** permission. Using `⌘Tab` window switching may also need **Input Monitoring**.
+- No Xcode/toolchain needed to install — a prebuilt universal binary is downloaded. (Building from source needs the Swift 6 Command Line Tools.)
 
 ## Install
 
 ```bash
-xcode-select --install                    # if you don't have the Command Line Tools yet
 brew install yoonhoGo/tap/keyouse
 ```
 
-Built from source on install (no code signing needed — Gatekeeper doesn't block a locally built binary; `swift build` ad-hoc signs it). If Homebrew asks you to trust the tap, follow its prompt (`brew trust --formula yoonhoGo/tap/keyouse`).
+Installs a prebuilt universal binary — no build, no Xcode. No code signing/notarization is involved: the binary is ad-hoc signed by `swift build` and a Homebrew formula download isn't quarantined, so Gatekeeper allows it. If Homebrew asks you to trust the tap, follow its prompt (`brew trust --formula yoonhoGo/tap/keyouse`).
 
 Then grant **Accessibility** permission (System Settings › Privacy & Security › Accessibility) and run `keyouse`.
 
@@ -84,9 +83,9 @@ See `CLAUDE.md` for architecture.
 
 ## Releasing (maintainers)
 
-Distribution is a **Homebrew tap** ([yoonhoGo/homebrew-tap](https://github.com/yoonhoGo/homebrew-tap)) whose formula builds from source, so no Apple Developer account, code signing, or notarization is involved.
+Distribution is a **Homebrew tap** ([yoonhoGo/homebrew-tap](https://github.com/yoonhoGo/homebrew-tap)) whose formula installs a **prebuilt universal binary** from the GitHub release. No Apple Developer account, code signing, or notarization is involved (ad-hoc signed, formula downloads aren't quarantined).
 
-Cutting a release is automated by `.github/workflows/release.yml` — push a tag and it creates the GitHub release and bumps the tap formula (`url` + `sha256`):
+Cutting a release is automated by `.github/workflows/release.yml` — push a tag and it builds the universal binary, publishes the release with it, and bumps the tap formula (`url` + `sha256` + `version`):
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
