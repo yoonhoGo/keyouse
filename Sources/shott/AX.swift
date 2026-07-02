@@ -107,11 +107,17 @@ enum AX {
         }
     }
 
-    /// Scroll at the element: warp the cursor over it, then post a wheel event.
-    /// ponytail: warp is required because scroll events hit wherever the cursor is, not a coord.
-    static func scroll(_ hit: Hit, dy: Int32) {
-        CGWarpMouseCursorPosition(center(hit))
-        CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
-                wheel1: dy, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+    /// Scroll the given app's focused window: warp the cursor to its center (so the wheel event
+    /// lands on the content), then deliver the event straight to that process.
+    /// ponytail: postToPid + warp is what reaches a non-frontmost window reliably.
+    static func scroll(pid: pid_t, lines: Int32) {
+        let axApp = AXUIElementCreateApplication(pid)
+        if let win = attr(axApp, kAXFocusedWindowAttribute as String)
+            ?? attr(axApp, kAXMainWindowAttribute as String),
+           let f = frame(of: win as! AXUIElement) {
+            CGWarpMouseCursorPosition(CGPoint(x: f.midX, y: f.midY))
+        }
+        CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1,
+                wheel1: lines, wheel2: 0, wheel3: 0)?.postToPid(pid)
     }
 }
