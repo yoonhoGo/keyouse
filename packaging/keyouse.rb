@@ -9,7 +9,7 @@ class Keyouse < Formula
   desc "Keyboard-driven macOS UI navigator (accessibility-based, like Shortcat)"
   homepage "https://github.com/yoonhoGo/keyouse"
   url "https://github.com/yoonhoGo/keyouse/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "REPLACE_WITH_TARBALL_SHA256"   # shasum -a 256 <downloaded tarball>
+  sha256 "a9c1ee65a2c46e2248824455effe579848d5e66d4ca1e81d831d34eea3afd493"
   license "MIT"
 
   depends_on :macos
