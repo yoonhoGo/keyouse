@@ -41,6 +41,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var selected = 0
     private var hintBuffer = ""
     private var previousApp: NSRunningApplication?
+    private var targetWindow: AXUIElement?   // set when a specific window was picked; nil = whole app
 
     private var mode: Mode = .search
     private var windows: [WindowInfo] = []
@@ -83,6 +84,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if window != nil { regrabFocus(); return }
         guard let screen = primaryScreen else { return }
         previousApp = NSWorkspace.shared.frontmostApplication
+        targetWindow = nil
         let hits = AX.scan(screen: screen.frame)
         guard !hits.isEmpty else { return }
         allHits = hits; matches = hits; selected = 0; hintBuffer = ""; mode = .search; cmdWasDown = false
@@ -189,6 +191,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private func handleKeyDown(keyCode: UInt16, chars: String?, mods: NSEvent.ModifierFlags) -> Bool {
         if mode == .windowPicker { handlePickerKey(keyCode: keyCode, chars: chars); return true }
         if mods.contains(.command), keyCode == 43 { openPreferences(); return true }        // ⌘, settings
+        if mods.contains(.command), keyCode == 15 { rescan(); return true }                 // ⌘R rescan
         if mods.contains(.control), chars?.lowercased() == "i" { focusFirstInput(); return true } // ⌃I first input
         switch keyCode {
         case 53: dismiss(restoreFocus: true); return true
@@ -292,6 +295,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         settings.show()
     }
 
+    // ⌘R: re-scan the current target (picked window, else current app) and refresh hints.
+    private func rescan() {
+        guard window != nil, let screen = primaryScreen else { return }
+        if let win = targetWindow, let pid = previousApp?.processIdentifier {
+            allHits = AX.scanWindow(win, appPid: pid, screen: screen.frame)
+        } else {
+            allHits = AX.scan(screen: screen.frame, frontApp: previousApp)
+        }
+        selected = 0; hintBuffer = ""
+        refilter()
+    }
+
     // ⌃I: focus the first text input among the scanned elements, then get out of the way.
     private func focusFirstInput() {
         guard let target = allHits.first(where: { $0.role == "AXTextField" || $0.role == "AXTextArea" }) else { return }
@@ -342,6 +357,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         let entry = windows[index]
         hideWindowPicker()
         previousApp = NSRunningApplication(processIdentifier: entry.pid)
+        targetWindow = entry.element
         AX.raise(entry.element)
         previousApp?.activate()
         allHits = AX.scanWindow(entry.element, appPid: entry.pid, screen: screen.frame)
@@ -374,7 +390,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         pickerGlass = nil; pickerView = nil; windows = []; mode = .search
         allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none
         if restoreFocus { previousApp?.activate() }
-        previousApp = nil
+        previousApp = nil; targetWindow = nil
     }
 }
 
