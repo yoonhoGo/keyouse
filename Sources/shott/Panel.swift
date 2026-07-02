@@ -9,7 +9,7 @@ final class PanelView: NSView {
     private let countLabel = NSTextField(labelWithString: "")
     private let guideLabel = NSTextField(labelWithString: "")
 
-    static let guideText = "숫자 클릭   글자 검색   ⏎ 클릭   ⌘+숫자 우클릭   ⇧↑↓ 스크롤   ⌘Tab 창전환   esc 취소"
+    static let guideText = "숫자 클릭   ⌃+숫자 우클릭   ⌘ 버튼만   글자 검색   ⇧↑↓ 스크롤   ⌘Tab 창전환   esc"
 
     override init(frame: NSRect) {
         super.init(frame: frame)

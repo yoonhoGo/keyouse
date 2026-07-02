@@ -48,6 +48,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var pickerGlass: NSView?
     private var pickerView: WindowPickerView?
     private var cmdWasDown = false
+    private var buttonsOnly = false   // while ⌘ is held: restrict hints to buttons for faster jumps
+
+    private static let buttonRoles: Set<String> = ["AXButton", "AXMenuButton", "AXPopUpButton"]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let opts = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
@@ -112,7 +115,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         w.makeFirstResponder(pv.field)
         enableTap()
 
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] e in
+            if e.type == .flagsChanged {
+                let cmd = e.modifierFlags.contains(.command)
+                MainActor.assumeIsolated { self?.setButtonsOnly(cmd) }
+                return e
+            }
             let keyCode = e.keyCode
             let mods = e.modifierFlags
             let chars = e.charactersIgnoringModifiers
@@ -180,12 +188,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if mode == .windowPicker { handlePickerKey(keyCode: keyCode, chars: chars); return true }
         switch keyCode {
         case 53: dismiss(restoreFocus: true); return true
-        case 36: act(on: selected, rightClick: mods.contains(.command)); return true
+        case 36: act(on: selected, rightClick: mods.contains(.control)); return true   // ⌃⏎ = right click
         case 125: mods.contains(.shift) ? scrollSelected(pageUp: false) : move(1); return true
         case 126: mods.contains(.shift) ? scrollSelected(pageUp: true) : move(-1); return true
         default:
-            if let ch = chars?.first, ch.isNumber, !mods.contains(.option), !mods.contains(.control) {
-                pushDigit(String(ch), rightClick: mods.contains(.command)); return true
+            if let ch = chars?.first, ch.isNumber, !mods.contains(.option) {
+                pushDigit(String(ch), rightClick: mods.contains(.control)); return true   // ⌃+숫자 = right click
             }
             return false
         }
@@ -210,12 +218,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
     private func refilter() {
         let query = panelView?.query ?? ""
-        matches = query.isEmpty
-            ? allHits
-            : allHits.filter { $0.label.localizedCaseInsensitiveContains(query) }
+        var base = query.isEmpty ? allHits : allHits.filter { $0.label.localizedCaseInsensitiveContains(query) }
+        if buttonsOnly { base = base.filter { Self.buttonRoles.contains($0.role) } }
+        matches = base
         selected = min(selected, max(0, matches.count - 1))
         pushHighlights()
         panelView?.update(count: matches.count)
+    }
+
+    // ⌘ held -> restrict hints to buttons (fewer, faster to reach); release -> restore.
+    private func setButtonsOnly(_ on: Bool) {
+        guard mode == .search, on != buttonsOnly else { return }
+        buttonsOnly = on
+        hintBuffer = ""
+        refilter()
     }
 
     private func pushHighlights() {
@@ -287,6 +303,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         pickerGlass = nil; pickerView = nil
         highlight?.isHidden = false
         mode = .search
+        buttonsOnly = false; refilter()
     }
 
     private func moveWindowSel(_ delta: Int) {
