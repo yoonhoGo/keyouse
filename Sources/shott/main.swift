@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Darwin
 
 // shott — hotkey -> Liquid Glass search panel -> filter by label / pick by number -> act.
 // Trigger: ⌘⇧Space. While open, ⌘Tab drives shott's own window picker (a CGEventTap steals
@@ -35,6 +36,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var localMonitor: Any?
     private var mouseMonitor: Any?
     private var modActive = false        // any modifier held -> hide panel so it doesn't obscure
+    private var statusItem: NSStatusItem?
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
@@ -76,8 +78,33 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             let pid = app.processIdentifier
             MainActor.assumeIsolated { self?.onAppActivated(pid: pid) }
         }
+        setupStatusItem()
         print("shott 준비됨. ⌘⇧Space 로 검색 패널을 여세요.")
     }
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let img = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "shott") {
+            item.button?.image = img
+        } else {
+            item.button?.title = "S"
+        }
+        let menu = NSMenu()
+        menu.addItem(withTitle: "열기", action: #selector(menuOpen), keyEquivalent: "")
+        menu.addItem(withTitle: "닫기", action: #selector(menuClose), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "환경설정…", action: #selector(menuSettings), keyEquivalent: ",")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "종료", action: #selector(menuQuit), keyEquivalent: "q")
+        menu.items.forEach { $0.target = self }
+        item.menu = menu
+        statusItem = item
+    }
+
+    @objc private func menuOpen() { activate() }
+    @objc private func menuClose() { dismiss(restoreFocus: false) }
+    @objc private func menuSettings() { dismiss(restoreFocus: false); settings.show() }
+    @objc private func menuQuit() { NSApp.terminate(nil) }
 
     private var primaryScreen: NSScreen? {
         NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
@@ -453,6 +480,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         previousApp = nil; targetWindow = nil
     }
 }
+
+// Detach from the terminal: re-launch a copy in its own session and let the parent exit,
+// so `shott` from a shell returns the prompt immediately while the app keeps running.
+if ProcessInfo.processInfo.environment["SHOTT_DETACHED"] == nil {
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: Bundle.main.executablePath ?? CommandLine.arguments[0])
+    var env = ProcessInfo.processInfo.environment
+    env["SHOTT_DETACHED"] = "1"
+    child.environment = env
+    child.standardOutput = FileHandle.nullDevice
+    child.standardError = FileHandle.nullDevice
+    child.standardInput = FileHandle.nullDevice
+    do { try child.run() } catch { fputs("shott 실행 실패: \(error)\n", stderr) }
+    exit(0)
+}
+setsid()   // new session, no controlling terminal -> survives the shell closing
+
+// Single instance: hold an exclusive lock for our lifetime; a second launch can't get it and exits.
+// (fd is intentionally kept open — the lock releases automatically when the process ends.)
+let lockFD = open("\(NSTemporaryDirectory())shott.lock", O_CREAT | O_RDWR, 0o644)
+if lockFD < 0 || flock(lockFD, LOCK_EX | LOCK_NB) != 0 { exit(0) }
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
