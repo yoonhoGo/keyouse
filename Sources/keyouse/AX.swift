@@ -253,6 +253,17 @@ enum AX {
         }
     }
 
+    /// ⌘-click via synthesized events — opens links in a new tab in browsers ("open in new tab").
+    /// Always synthesized (not AXPress) since the semantic needs the Command modifier held.
+    static func cmdClick(_ hit: Hit) {
+        let p = center(hit)
+        for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+            let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)
+            e?.flags = .maskCommand
+            e?.post(tap: .cghidEventTap)
+        }
+    }
+
     /// Right click via synthesized events (no standard AX action for this).
     static func rightClick(_ hit: Hit) {
         let p = center(hit)

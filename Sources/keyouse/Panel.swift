@@ -12,10 +12,12 @@ final class PanelView: NSView {
         [
             (L.t("Click · Move", "클릭 · 이동"), [
                 (L.t("num", "숫자"), L.t("click", "클릭")),
-                (L.t("⇧num", "⇧숫자"), L.t("right-click", "우클릭")),
+                (L.t("⇧num", "⇧숫자"), L.t("new tab", "새 탭")),
+                (L.t("⌥num", "⌥숫자"), L.t("right-click", "우클릭")),
                 ("⏎", L.t("click sel.", "선택 클릭")),
-                ("↑↓", L.t("move sel.", "선택 이동")),
-                ("⇧↑↓", L.t("scroll", "스크롤")),
+                Settings.navHJKL ? ("⇧K ⇧J", L.t("move sel.", "선택 이동")) : ("↑↓", L.t("move sel.", "선택 이동")),
+                Settings.navHJKL ? ("⇧U ⇧D", L.t("scroll", "스크롤")) : ("⇧↑↓", L.t("scroll", "스크롤")),
+                Settings.navHJKL ? ("⇧H ⇧L", L.t("back/fwd", "뒤로/앞으로")) : ("⇧←→", L.t("back/fwd", "뒤로/앞으로")),
                 ("esc", L.t("cancel", "취소")),
             ]),
             (L.t("Filter · Search", "필터 · 검색"), [
@@ -145,7 +147,7 @@ enum Panel {
     static func size(showGuide: Bool) -> NSSize {
         guard showGuide else { return NSSize(width: width, height: 78) }
         let f = CGFloat(Settings.guideFontSize)
-        let rows: CGFloat = 7                      // tallest group
+        let rows: CGFloat = 8                      // tallest group
         let h = 22 + 34 + 16 + (f + 4) + rows * (f + 9) + 22   // pad + field + gap + header + rows + pad
         return NSSize(width: width, height: h)
     }

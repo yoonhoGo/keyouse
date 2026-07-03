@@ -25,10 +25,16 @@ enum LoginItem {
     }
 }
 
+enum Build {
+    // Keep in sync with the release tag. CI (release.yml) rewrites this on tag push.
+    static let version = "0.2.0"
+    static let repo = "yoonhoGo/keyouse"
+}
+
 enum Settings {
     static let keys = ["triggerKeyCode", "triggerMods", "triggerLabel", "showGuide",
                        "guideFontSize", "panelActiveOpacity", "scrollRescanDelay",
-                       "cmdVisibleRoles", "ctrlVisibleRoles", "language"]
+                       "cmdVisibleRoles", "ctrlVisibleRoles", "language", "navHJKL"]
 
     /// Sentinel triggerKeyCode meaning "double-tap the trigger modifier" (no real key). 0xFFFF
     /// never matches an actual keyCode, so the keyDown path stays inert for this trigger.
@@ -74,6 +80,11 @@ enum Settings {
         get { let v = d.double(forKey: "scrollRescanDelay"); return v > 0 ? v : 1.0 }
         set { d.set(newValue, forKey: "scrollRescanDelay") }
     }
+    /// Navigation keys: false = arrows (↑↓ move, ⇧↑↓ scroll), true = ⇧HJKL (⇧K/⇧J move, ⇧H/⇧L scroll).
+    static var navHJKL: Bool {
+        get { d.bool(forKey: "navHJKL") }
+        set { d.set(newValue, forKey: "navHJKL") }
+    }
     /// Roles shown while ⌘ is held. Default: in-window command controls.
     static var cmdVisibleRoles: Set<String> {
         get {
@@ -110,6 +121,8 @@ final class SettingsWindow: NSObject {
     private var delayLabel: NSTextField?
     private var fontLabel: NSTextField?
     private var opacityLabel: NSTextField?
+    private var updateStatus: NSTextField?
+    private var updateButton: NSButton?
     private var recordMonitor: Any?
     private var recordFlagsMonitor: Any?
     private var recording = false
@@ -135,6 +148,7 @@ final class SettingsWindow: NSObject {
         if window == nil { build() }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        checkForUpdate()
     }
 
     private func build() {
@@ -169,6 +183,15 @@ final class SettingsWindow: NSObject {
         let guideCB = NSButton(checkboxWithTitle: L.t("Show shortcut guide", "단축키 가이드 표시"), target: self, action: #selector(toggleGuide(_:)))
         guideCB.state = Settings.showGuide ? .on : .off
         stack.addArrangedSubview(guideCB)
+
+        stack.addArrangedSubview(spacer())
+        stack.addArrangedSubview(header(L.t("Navigation keys", "네비게이션 키")))
+        let navPopup = NSPopUpButton()
+        navPopup.addItems(withTitles: [L.t("Arrows (↑↓ move, ⇧↑↓ scroll)", "화살표 (↑↓ 이동, ⇧↑↓ 스크롤)"),
+                                       L.t("⇧HJKL (⇧K/⇧J move, ⇧H/⇧L scroll)", "⇧HJKL (⇧K/⇧J 이동, ⇧H/⇧L 스크롤)")])
+        navPopup.selectItem(at: Settings.navHJKL ? 1 : 0)
+        navPopup.target = self; navPopup.action = #selector(navChanged(_:))
+        stack.addArrangedSubview(navPopup)
 
         stack.addArrangedSubview(spacer())
         stack.addArrangedSubview(header(L.t("Guide font size", "가이드 글자 크기")))
@@ -211,6 +234,15 @@ final class SettingsWindow: NSObject {
         stack.addArrangedSubview(cols)
 
         stack.addArrangedSubview(spacer())
+        stack.addArrangedSubview(header(L.t("Version", "버전")))
+        stack.addArrangedSubview(caption("keyouse \(Build.version)"))
+        let us = caption(L.t("Checking for updates…", "업데이트 확인 중…")); updateStatus = us
+        stack.addArrangedSubview(us)
+        let upd = NSButton(title: L.t("Update now", "지금 업데이트"), target: self, action: #selector(updateNow))
+        upd.bezelStyle = .rounded; upd.isEnabled = false; updateButton = upd
+        stack.addArrangedSubview(upd)
+
+        stack.addArrangedSubview(spacer())
         let reset = NSButton(title: L.t("Reset to defaults", "기본값으로 리셋"), target: self, action: #selector(resetDefaults))
         reset.bezelStyle = .rounded
         stack.addArrangedSubview(reset)
@@ -224,7 +256,7 @@ final class SettingsWindow: NSObject {
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
 
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 940),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = L.t("keyouse Settings", "keyouse 환경설정")
         w.contentView = content
@@ -247,6 +279,61 @@ final class SettingsWindow: NSObject {
     @objc private func toggleLogin(_ s: NSButton) { LoginItem.setEnabled(s.state == .on) }
 
     @objc private func toggleGuide(_ s: NSButton) { Settings.showGuide = (s.state == .on) }
+
+    @objc private func navChanged(_ s: NSPopUpButton) { Settings.navHJKL = (s.indexOfSelectedItem == 1) }
+
+    // MARK: - version / update
+
+    private func checkForUpdate() {
+        updateStatus?.stringValue = L.t("Checking for updates…", "업데이트 확인 중…")
+        updateButton?.isEnabled = false
+        let url = URL(string: "https://api.github.com/repos/\(Build.repo)/releases/latest")!
+        var req = URLRequest(url: url, timeoutInterval: 10)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            let tag = data
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                .flatMap { $0["tag_name"] as? String }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.applyUpdateResult(latestTag: tag) } }
+        }.resume()
+    }
+
+    private func applyUpdateResult(latestTag: String?) {
+        guard let latest = latestTag?.trimmingCharacters(in: CharacterSet(charactersIn: "v")), !latest.isEmpty else {
+            updateStatus?.stringValue = L.t("Couldn't check for updates.", "업데이트를 확인하지 못했습니다.")
+            return
+        }
+        if isNewer(latest, than: Build.version) {
+            updateStatus?.stringValue = L.t("Update available: \(latest)", "새 버전 있음: \(latest)")
+            updateButton?.isEnabled = true
+        } else {
+            updateStatus?.stringValue = L.t("You're up to date.", "최신 버전입니다.")
+            updateButton?.isEnabled = false
+        }
+    }
+
+    private func isNewer(_ latest: String, than current: String) -> Bool {
+        let a = latest.split(separator: ".").map { Int($0) ?? 0 }
+        let b = current.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+
+    // Prefer a Homebrew upgrade (run in Terminal so the user sees progress and PATH is right);
+    // fall back to opening the releases page when brew isn't installed.
+    @objc private func updateNow() {
+        let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].first { FileManager.default.isExecutableFile(atPath: $0) }
+        if let brew {
+            let cmd = "\(brew) upgrade yoonhoGo/tap/keyouse || \(brew) install yoonhoGo/tap/keyouse"
+            let src = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"
+            NSAppleScript(source: src)?.executeAndReturnError(nil)
+        } else {
+            NSWorkspace.shared.open(URL(string: "https://github.com/\(Build.repo)/releases/latest")!)
+        }
+    }
 
     @objc private func languageChanged(_ s: NSPopUpButton) {
         L.lang = s.indexOfSelectedItem == 1 ? .ko : .en

@@ -15,6 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Stamp version into the binary
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          sed -i.bak -E "s/static let version = \"[0-9.]+\"/static let version = \"$ver\"/" Sources/keyouse/Settings.swift
+          rm -f Sources/keyouse/Settings.swift.bak
+
       - name: Build universal binary
         run: |
           swift build -c release --arch arm64 --arch x86_64

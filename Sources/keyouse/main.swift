@@ -286,20 +286,49 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if mods.contains(.command), keyCode == 12 { sendShortcut(keyCode: 12, shift: false); return true }               // ⌘Q quit app
         if mods.contains(.command), keyCode == 13 { sendShortcut(keyCode: 13, shift: mods.contains(.shift)); return true } // ⌘W tab / ⌘⇧W window
         if mods.contains(.control), chars?.lowercased() == "i" { focusFirstInput(); return true } // ⌃I first input
+        // Letter navigation (opt-in via the nav-style setting). Search matching is case-insensitive,
+        // so ⇧+letter is free to repurpose; plain letters still type into the field.
+        //   ⇧K/⇧J hint up/down · ⇧U/⇧D scroll up/down · ⇧H/⇧L history back/forward.
+        if Settings.navHJKL, mods.contains(.shift),
+           !mods.contains(.command), !mods.contains(.control), !mods.contains(.option) {
+            switch keyCode {
+            case 40: move(-1); return true                          // ⇧K hint up
+            case 38: move(1); return true                           // ⇧J hint down
+            case 32: scrollSelected(pageUp: true); return true      // ⇧U scroll up
+            case 2:  scrollSelected(pageUp: false); return true     // ⇧D scroll down
+            case 4:  navigateHistory(forward: false); return true   // ⇧H back
+            case 37: navigateHistory(forward: true); return true    // ⇧L forward
+            default: break
+            }
+        }
         switch keyCode {
         case 53: dismiss(restoreFocus: true); return true
         case 51:                                                                        // Backspace
             if !hintBuffer.isEmpty { hintBuffer = String(hintBuffer.dropLast()); pushHighlights(); return true }
             return false   // no number in progress -> let the field delete search text
-        case 36: act(on: selected, rightClick: mods.contains(.shift)); return true      // ⇧⏎ = right click
-        case 125: mods.contains(.shift) ? scrollSelected(pageUp: false) : move(1); return true
-        case 126: mods.contains(.shift) ? scrollSelected(pageUp: true) : move(-1); return true
+        case 36: act(on: selected, kind: clickKind(mods)); return true                  // ⏎ / ⇧⏎ new tab / ⌥⏎ right
+        case 125: mods.contains(.shift) ? scrollSelected(pageUp: false) : move(1); return true   // ↓ / ⇧↓ scroll
+        case 126: mods.contains(.shift) ? scrollSelected(pageUp: true) : move(-1); return true    // ↑ / ⇧↑ scroll
+        case 123: if mods.contains(.shift) { navigateHistory(forward: false); return true }; return false  // ⇧← back
+        case 124: if mods.contains(.shift) { navigateHistory(forward: true); return true }; return false   // ⇧→ forward
         default:
-            if let ch = chars?.first, ch.isNumber, !mods.contains(.option) {
-                pushDigit(String(ch), rightClick: mods.contains(.shift)); return true    // ⇧+숫자 = right click
+            // Detect digits by keyCode so shift/option don't remap them (⇧2 = "@", ⌥ = symbols).
+            if let d = Self.digitKeyCodes[keyCode] {
+                pushDigit(d, kind: clickKind(mods)); return true    // num click · ⇧num new tab · ⌥num right-click
             }
             return false
         }
+    }
+
+    // Number-row keyCodes → digit, independent of shift/option.
+    private static let digitKeyCodes: [UInt16: String] =
+        [18:"1", 19:"2", 20:"3", 21:"4", 23:"5", 22:"6", 26:"7", 28:"8", 25:"9", 29:"0"]
+
+    private enum ClickKind { case left, right, newTab }
+    private func clickKind(_ mods: NSEvent.ModifierFlags) -> ClickKind {
+        if mods.contains(.shift) { return .newTab }     // ⇧ = open in new tab (⌘-click)
+        if mods.contains(.option) { return .right }     // ⌥ = right click
+        return .left
     }
 
     private func handlePickerKey(keyCode: UInt16, chars: String?) {
@@ -418,7 +447,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         }
     }
 
-    private func pushDigit(_ d: String, rightClick: Bool) {
+    private func pushDigit(_ d: String, kind: ClickKind) {
         guard !matches.isEmpty else { return }
         let candidate = hintBuffer + d
         let numbers = matches.indices.map { String($0 + 1) }
@@ -427,13 +456,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         hintBuffer = candidate
         if let idx = Int(candidate).map({ $0 - 1 }), matches.indices.contains(idx) { selected = idx }
         if cands.count == 1, cands[0] == candidate, let idx = Int(candidate).map({ $0 - 1 }) {
-            act(on: idx, rightClick: rightClick)
+            act(on: idx, kind: kind)
         } else {
             pushHighlights()
         }
     }
 
-    private func act(on index: Int, rightClick: Bool) {
+    private func act(on index: Int, kind: ClickKind) {
         guard matches.indices.contains(index) else { return }
         let target = matches[index]
         dismiss(restoreFocus: false)
@@ -442,7 +471,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             NSRunningApplication(processIdentifier: target.pid)?.activate()
         } else {
             NSRunningApplication(processIdentifier: target.pid)?.activate()
-            rightClick ? AX.rightClick(target) : AX.press(target)
+            switch kind {
+            case .left: AX.press(target)
+            case .right: AX.rightClick(target)
+            case .newTab: AX.cmdClick(target)
+            }
         }
     }
 
@@ -456,9 +489,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         AX.sendKey(keyCode: keyCode, shift: shift, toPid: pid)
     }
 
+    // Move the hint selection. While a digit prefix is entered (e.g. "2" activating 2, 2x, 2xx),
+    // move only within that narrowed candidate set so navigation stays inside what's shown.
     private func move(_ delta: Int) {
         guard !matches.isEmpty else { return }
-        selected = max(0, min(matches.count - 1, selected + delta))
+        let candidates = hintBuffer.isEmpty
+            ? Array(matches.indices)
+            : matches.indices.filter { String($0 + 1).hasPrefix(hintBuffer) }
+        guard !candidates.isEmpty else { return }
+        let cur = candidates.firstIndex(of: selected) ?? 0
+        selected = candidates[max(0, min(candidates.count - 1, cur + delta))]
         highlight?.selected = selected
         highlight?.needsDisplay = true
     }
@@ -467,7 +507,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         let pid = matches.indices.contains(selected) ? matches[selected].pid : previousApp?.processIdentifier
         guard let pid else { return }
         AX.scroll(pid: pid, down: !pageUp)
-        // Debounce: rescan only once scrolling has stopped for 1s (handles rapid repeats).
+        scheduleRescan()
+    }
+
+    // Browser/document history back (⌘[) / forward (⌘]) on the selected item's app (else the app we
+    // came from). Delivered straight to the process; the page changes, so refresh hints afterwards.
+    private func navigateHistory(forward: Bool) {
+        let pid = (matches.indices.contains(selected) ? matches[selected].pid : nil) ?? previousApp?.processIdentifier
+        guard let pid else { return }
+        AX.sendKey(keyCode: forward ? 30 : 33, shift: false, toPid: pid)   // ⌘] / ⌘[
+        scheduleRescan()
+    }
+
+    // Hide the (now-stale) overlay and rescan once movement has stopped for the configured delay
+    // (debounced so rapid repeats coalesce into a single rescan).
+    private func scheduleRescan() {
+        highlight?.isHidden = true
         rescanWork?.cancel()
         let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.rescan() } }
         rescanWork = work
@@ -488,6 +543,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             allHits = AX.scan(screen: screen.frame, frontApp: previousApp, expanded: expanded)
         }
         selected = 0; hintBuffer = ""
+        highlight?.isHidden = false   // re-show hints hidden during scrolling
         refilter()
     }
 
