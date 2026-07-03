@@ -36,25 +36,32 @@ A menu-bar icon appears. Launched from a terminal, the process detaches so the p
 
 ## Usage
 
-Default trigger **`⌘⇧Space`** opens the search panel.
+Default trigger **`⌘⇧Space`** opens the search panel. Rebind it to any combo — or to a **double-tapped modifier** like `⌘⌘` (Settings).
 
 | Key | Action |
 |-----|--------|
 | type text | filter elements by label (IME/CJK supported) |
-| `num` | left-click that hinted element |
-| `⇧num` | right-click |
-| `⏎` / `⇧⏎` | left / right click the selected element |
-| `↑` `↓` | move selection |
-| `⇧↑` `⇧↓` | scroll (a third of the scroll area) |
+| `num` | click that hinted element |
+| `⇧num` | open in a new tab (`⌘`-click) |
+| `⌥num` | right-click |
+| `⏎` | click the selected element (`⇧⏎` new tab · `⌥⏎` right-click) |
+| `↑` `↓` *(or `⇧K` `⇧J`)* | move selection |
+| `⇧↑` `⇧↓` *(or `⇧U` `⇧D`)* | scroll (a third of the scroll area) |
+| `⇧←` `⇧→` *(or `⇧H` `⇧L`)* | history back / forward (`⌘[` / `⌘]`) |
 | `⌘` (while held) | show buttons only |
 | `⌃` (while held) | show form fields only (text / checkbox / radio) |
 | `⌘L` | links only (toggle) |
 | `⌃I` | focus the first input field |
+| `/w` `/t` `/s` | search open windows / tabs / every pressable element |
+| `⌘Q` | quit the front app |
+| `⌘W` / `⌘⇧W` | close the current tab / window |
 | `⌘Tab` | window picker · next (`⇧⌘Tab` prev, `⌘←→↑↓` move, release `⌘` to choose) |
 | `⌘R` | rescan hints |
+| `⌘S` | toggle deep search mode (hint every pressable element) |
 | `⌘,` | settings |
 | `esc` | cancel |
 
+- The `⇧`/`⌥`-letter navigation keys are opt-in — pick **Arrows** or **⇧HJKL** in Settings.
 - Menu-bar and Dock elements are hinted too, not just the front app.
 - While a modifier is held or a number is being entered, the panel gets out of the way (configurable).
 - After scrolling, hints are re-scanned shortly.
@@ -63,12 +70,14 @@ Default trigger **`⌘⇧Space`** opens the search panel.
 ## Settings (`⌘,`)
 
 - **Language** (English / 한국어)
-- **Trigger shortcut** (record a new combo)
+- **Panel shortcut** (record a combo, or double-tap a modifier like `⌘⌘`)
 - **Start at login** (LaunchAgent)
+- **Navigation keys** (Arrows or ⇧HJKL)
 - **Shortcut guide** visibility and font size
 - **Panel opacity while typing** (0 = hidden)
 - **Rescan delay after scrolling**
 - **Roles shown for the `⌘` / `⌃` filters** (AX-role checkboxes)
+- **Version / check for updates** (in-app update from the Homebrew tap)
 - **Reset to defaults**
 
 Settings persist in `UserDefaults`. Font/guide-visibility changes apply the next time the panel opens.
