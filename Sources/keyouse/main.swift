@@ -62,7 +62,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private enum Filter { case none, controls, forms, links }
     private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields, ⌘L -> links (sticky)
     private var sticky = false            // true when filter is a toggle (⌘L), not a held modifier
-    private var expanded = false          // ⌘A: also collect AXPress-actionable elements (web/Electron)
+    private enum Source { case elements, windows, tabs, all }
+    private var source: Source = .elements   // /w -> windows, /t -> tabs, /s -> every pressable element
+    private var sourceHits: [Hit] = []        // cached window/tab hits for the active search mode
+    private var expanded = false          // ⌘S: also collect AXPress-actionable elements (web/Electron)
     private lazy var settings: SettingsWindow = {
         let s = SettingsWindow()
         s.onLanguageChange = { [weak self] in self?.rebuildStatusMenu() }
@@ -278,8 +281,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if mode == .windowPicker { handlePickerKey(keyCode: keyCode, chars: chars); return true }
         if mods.contains(.command), keyCode == 43 { openPreferences(); return true }        // ⌘, settings
         if mods.contains(.command), keyCode == 15 { rescan(); return true }                 // ⌘R rescan
-        if mods.contains(.command), keyCode == 0 { expanded.toggle(); rescan(); return true } // ⌘A expand scan
+        if mods.contains(.command), keyCode == 1 { expanded.toggle(); rescan(); return true } // ⌘S search mode
         if mods.contains(.command), keyCode == 37 { toggleLinksFilter(); return true }      // ⌘L links
+        if mods.contains(.command), keyCode == 12 { sendShortcut(keyCode: 12, shift: false); return true }               // ⌘Q quit app
+        if mods.contains(.command), keyCode == 13 { sendShortcut(keyCode: 13, shift: mods.contains(.shift)); return true } // ⌘W tab / ⌘⇧W window
         if mods.contains(.control), chars?.lowercased() == "i" { focusFirstInput(); return true } // ⌃I first input
         switch keyCode {
         case 53: dismiss(restoreFocus: true); return true
@@ -315,18 +320,48 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     func controlTextDidChange(_ obj: Notification) { hintBuffer = ""; refilter() }
 
     private func refilter() {
-        let query = panelView?.query ?? ""
-        var base = query.isEmpty ? allHits : allHits.filter { $0.label.localizedCaseInsensitiveContains(query) }
-        switch filter {
-        case .none: break
-        case .controls: let v = Settings.cmdVisibleRoles; base = base.filter { v.contains($0.role) }
-        case .forms: let v = Settings.ctrlVisibleRoles; base = base.filter { v.contains($0.role) }
-        case .links: base = base.filter { $0.role == "AXLink" }
+        let (src, query) = Self.parseSource(panelView?.query ?? "")
+        if src != source { source = src; rebuildSource() }
+        let pool = source == .elements ? allHits : sourceHits
+        var base = query.isEmpty ? pool : pool.filter { $0.label.localizedCaseInsensitiveContains(query) }
+        if source == .elements {
+            switch filter {
+            case .none: break
+            case .controls: let v = Settings.cmdVisibleRoles; base = base.filter { v.contains($0.role) }
+            case .forms: let v = Settings.ctrlVisibleRoles; base = base.filter { v.contains($0.role) }
+            case .links: base = base.filter { $0.role == "AXLink" }
+            }
         }
         matches = base
         selected = min(selected, max(0, matches.count - 1))
         pushHighlights()
         panelView?.update(count: matches.count)
+    }
+
+    // A leading "/w" or "/t" (exact, or followed by a space) switches the search pool to open
+    // windows / current-app tabs; the rest is the filter text. Otherwise it's normal element search.
+    private static func parseSource(_ raw: String) -> (Source, String) {
+        for (p, s) in [("/w", Source.windows), ("/t", Source.tabs), ("/s", Source.all)] {
+            if raw == p { return (s, "") }
+            if raw.hasPrefix(p + " ") { return (s, String(raw.dropFirst(p.count + 1)).trimmingCharacters(in: .whitespaces)) }
+        }
+        return (.elements, raw)
+    }
+
+    private func rebuildSource() {
+        selected = 0; hintBuffer = ""
+        guard let screen = primaryScreen else { sourceHits = []; return }
+        switch source {
+        case .elements: sourceHits = []
+        case .windows: sourceHits = AX.windowHits(screen: screen.frame)
+        case .tabs: sourceHits = previousApp.map { AX.tabHits(pid: $0.processIdentifier, screen: screen.frame) } ?? []
+        case .all:                                   // every AXPress-able element (forces expanded scan)
+            if let win = targetWindow, let pid = previousApp?.processIdentifier {
+                sourceHits = AX.scanWindow(win, appPid: pid, screen: screen.frame, expanded: true)
+            } else {
+                sourceHits = AX.scan(screen: screen.frame, frontApp: previousApp, expanded: true)
+            }
+        }
     }
 
     // Modifier-held filters: ⌘ -> controls, ⌃ -> form fields; none -> all. Ignored while a sticky
@@ -402,8 +437,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         guard matches.indices.contains(index) else { return }
         let target = matches[index]
         dismiss(restoreFocus: false)
-        NSRunningApplication(processIdentifier: target.pid)?.activate()
-        rightClick ? AX.rightClick(target) : AX.press(target)
+        if target.role == "AXWindow" {                       // /w mode: raise the window, not click
+            AX.raise(target.element)
+            NSRunningApplication(processIdentifier: target.pid)?.activate()
+        } else {
+            NSRunningApplication(processIdentifier: target.pid)?.activate()
+            rightClick ? AX.rightClick(target) : AX.press(target)
+        }
+    }
+
+    // ⌘Q / ⌘W / ⌘⇧W: fire the standard shortcut at the selected item's app (else the app we came
+    // from). We're frontmost, so deliver the synthesized keys straight to that process.
+    private func sendShortcut(keyCode: CGKeyCode, shift: Bool) {
+        let pid = (matches.indices.contains(selected) ? matches[selected].pid : nil) ?? previousApp?.processIdentifier
+        guard let pid else { return }
+        dismiss(restoreFocus: false)
+        NSRunningApplication(processIdentifier: pid)?.activate()
+        AX.sendKey(keyCode: keyCode, shift: shift, toPid: pid)
     }
 
     private func move(_ delta: Int) {
@@ -526,6 +576,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         window = nil; highlight = nil; panelView = nil; panelGlass = nil
         pickerGlass = nil; pickerView = nil; windows = []; mode = .search
         allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none; sticky = false; expanded = false; modActive = false
+        source = .elements; sourceHits = []
         if restoreFocus { previousApp?.activate() }
         previousApp = nil; targetWindow = nil
     }

@@ -16,19 +16,25 @@ final class PanelView: NSView {
                 ("⏎", L.t("click sel.", "선택 클릭")),
                 ("↑↓", L.t("move sel.", "선택 이동")),
                 ("⇧↑↓", L.t("scroll", "스크롤")),
+                ("esc", L.t("cancel", "취소")),
             ]),
-            (L.t("Filter", "필터"), [
+            (L.t("Filter · Search", "필터 · 검색"), [
                 ("⌘", L.t("buttons", "버튼만")),
                 ("⌃", L.t("form fields", "입력폼만")),
                 ("⌘L", L.t("links", "링크만")),
                 ("⌃I", L.t("first input", "첫 입력")),
+                ("/w", L.t("windows", "윈도우")),
+                ("/t", L.t("tabs", "탭")),
+                ("/s", L.t("search mode", "검색모드")),
             ]),
-            (L.t("Window · Misc", "창 · 기타"), [
+            (L.t("Close · Misc", "닫기 · 기타"), [
+                ("⌘Q", L.t("quit app", "앱 종료")),
+                ("⌘W", L.t("close tab", "탭 닫기")),
+                ("⌘⇧W", L.t("close window", "창 닫기")),
                 ("⌘Tab", L.t("switch window", "창 전환")),
                 ("⌘R", L.t("rescan", "새로고침")),
-                ("⌘A", L.t("expand scan", "확장 스캔")),
+                ("⌘S", L.t("search mode", "검색모드")),
                 ("⌘,", L.t("settings", "설정")),
-                ("esc", L.t("cancel", "취소")),
             ]),
         ]
     }
@@ -139,7 +145,7 @@ enum Panel {
     static func size(showGuide: Bool) -> NSSize {
         guard showGuide else { return NSSize(width: width, height: 78) }
         let f = CGFloat(Settings.guideFontSize)
-        let rows: CGFloat = 5                      // tallest group
+        let rows: CGFloat = 7                      // tallest group
         let h = 22 + 34 + 16 + (f + 4) + rows * (f + 9) + 22   // pad + field + gap + header + rows + pad
         return NSSize(width: width, height: h)
     }

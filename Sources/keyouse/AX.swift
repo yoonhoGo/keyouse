@@ -50,10 +50,28 @@ enum AX {
     }
 
     static func label(of e: AXUIElement, role: String) -> String {
-        str(e, kAXTitleAttribute as String)
-            ?? str(e, kAXDescriptionAttribute as String)
-            ?? str(e, kAXValueAttribute as String)
-            ?? role
+        if let t = str(e, kAXTitleAttribute as String), !t.isEmpty { return t }
+        if let d = str(e, kAXDescriptionAttribute as String), !d.isEmpty { return d }
+        if let v = str(e, kAXValueAttribute as String), !v.isEmpty { return v }
+        // Composite pressables (Slack channel rows, clickable web divs) carry no label of their own —
+        // the visible text lives in descendant static-text nodes. Gather it so search can match.
+        let inner = descendantText(e, depth: 0)
+        return inner.isEmpty ? role : inner
+    }
+
+    // ponytail: shallow (depth ≤ 6) — a row's label sits near the top; only walked for label-less hits.
+    private static func descendantText(_ e: AXUIElement, depth: Int) -> String {
+        guard depth <= 6, let children = attr(e, kAXChildrenAttribute as String) as? [AXUIElement] else { return "" }
+        var parts: [String] = []
+        for c in children {
+            if let t = (str(c, kAXTitleAttribute as String) ?? str(c, kAXDescriptionAttribute as String)
+                        ?? str(c, kAXValueAttribute as String)), !t.isEmpty {
+                parts.append(t)
+            } else if case let sub = descendantText(c, depth: depth + 1), !sub.isEmpty {
+                parts.append(sub)
+            }
+        }
+        return parts.joined(separator: " ")
     }
 
     // Window chrome (traffic lights, full-screen) — actionable but pure clutter; never a target.
@@ -65,7 +83,7 @@ enum AX {
         if depth > 40 { return }   // ponytail: cap depth so a pathological tree can't hang the scan.
         let role = str(e, kAXRoleAttribute as String) ?? ""
         let subrole = str(e, kAXSubroleAttribute as String) ?? ""
-        // Default scan is the role whitelist. Expanded scan (⌘A) also grabs anything with an AXPress
+        // Default scan is the role whitelist. Expanded scan (⌘S) also grabs anything with an AXPress
         // action — web/Electron use non-button roles (Slack channels, table rows, clickable divs) that
         // the whitelist misses. ponytail: actions() is an extra AX round-trip, so only fire it on the
         // role miss and only when expanded; nested pressables may overlap, typing-to-filter absorbs it.
@@ -149,6 +167,63 @@ enum AX {
             }
         }
         return out
+    }
+
+    /// Open windows as Hits (role "AXWindow") for the `/w` search mode — highlighted + numbered
+    /// like elements; acting on one raises it. Only windows intersecting the primary screen.
+    static func windowHits(screen: CGRect) -> [Hit] {
+        var out: [Hit] = []
+        let mypid = ProcessInfo.processInfo.processIdentifier
+        for ra in NSWorkspace.shared.runningApplications
+        where ra.activationPolicy == .regular && ra.processIdentifier != mypid {
+            let axApp = AXUIElementCreateApplication(ra.processIdentifier)
+            guard let wins = attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement] else { continue }
+            let appName = ra.localizedName ?? "?"
+            for w in wins {
+                guard let f = frame(of: w), f.width > 60, f.height > 60, screen.intersects(f) else { continue }
+                let title = str(w, kAXTitleAttribute as String) ?? ""
+                let label = title.isEmpty ? appName : "\(appName) — \(title)"
+                out.append(Hit(element: w, pid: ra.processIdentifier, role: "AXWindow", subrole: "", label: label, frame: f))
+            }
+        }
+        return out
+    }
+
+    /// Tabs in the app's focused window (`/t` search mode): AXTab elements plus radio buttons that
+    /// live under an AXTabGroup (Safari/Chrome/… expose tabs this way). Acting = AXPress selects it.
+    static func tabHits(pid: pid_t, screen: CGRect) -> [Hit] {
+        let axApp = AXUIElementCreateApplication(pid)
+        enableWebA11y(axApp)
+        guard let winObj = attr(axApp, kAXFocusedWindowAttribute as String)
+            ?? attr(axApp, kAXMainWindowAttribute as String) else { return [] }
+        var out: [Hit] = []
+        collectTabs(winObj as! AXUIElement, pid: pid, screen: screen, depth: 0, inTabGroup: false, into: &out)
+        return out
+    }
+
+    private static func collectTabs(_ e: AXUIElement, pid: pid_t, screen: CGRect, depth: Int, inTabGroup: Bool, into hits: inout [Hit]) {
+        if depth > 40 { return }
+        let role = str(e, kAXRoleAttribute as String) ?? ""
+        let here = inTabGroup || role == "AXTabGroup"
+        let isTab = role == "AXTab" || (here && role == "AXRadioButton")
+        if isTab, let f = frame(of: e), f.width > 0, f.height > 0, screen.intersects(f) {
+            hits.append(Hit(element: e, pid: pid, role: role, subrole: "", label: label(of: e, role: role), frame: f))
+        }
+        if let children = attr(e, kAXChildrenAttribute as String) as? [AXUIElement] {
+            for c in children { collectTabs(c, pid: pid, screen: screen, depth: depth + 1, inTabGroup: here, into: &hits) }
+        }
+    }
+
+    /// Synthesize a ⌘-based shortcut (⌘Q/⌘W/⌘⇧W) and deliver it straight to a process.
+    static func sendKey(keyCode: CGKeyCode, shift: Bool, toPid pid: pid_t) {
+        let src = CGEventSource(stateID: .combinedSessionState)
+        var flags: CGEventFlags = .maskCommand
+        if shift { flags.insert(.maskShift) }
+        for down in [true, false] {
+            guard let e = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: down) else { continue }
+            e.flags = flags
+            e.postToPid(pid)
+        }
     }
 
     /// Bring a window to the front (its element handle stays valid regardless of focus).
