@@ -12,7 +12,7 @@ final class HighlightView: NSView {
     var codes: [String] = []     // hint number per rect
     var typed: String = ""       // in-progress hint digits; dims non-matching badges
     var selected: Int = 0
-    var screenHeight: CGFloat = 0
+    var axScreen: CGRect = .zero   // this view's screen in AX/global coords (top-left origin)
 
     override var isFlipped: Bool { false }
 
@@ -26,8 +26,8 @@ final class HighlightView: NSView {
             let dimmed = !typed.isEmpty && !code.hasPrefix(typed)
             let alpha: CGFloat = dimmed ? 0.25 : 1
 
-            // AX top-left origin -> Cocoa bottom-left origin (primary screen only).
-            let box = NSRect(x: r.minX, y: screenHeight - r.maxY, width: r.width, height: r.height)
+            // AX global (top-left origin) -> this screen's local Cocoa coords (bottom-left origin).
+            let box = NSRect(x: r.minX - axScreen.minX, y: axScreen.maxY - r.maxY, width: r.width, height: r.height)
                 .insetBy(dx: -2, dy: -2)
             let path = NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5)
             if i == selected {

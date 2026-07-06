@@ -35,6 +35,7 @@ final class PanelView: NSView {
                 ("⌘W", L.t("close tab", "탭 닫기")),
                 ("⌘⇧W", L.t("close window", "창 닫기")),
                 ("⌘Tab", L.t("switch window", "창 전환")),
+                ("⌘< ⌘>", L.t("switch display", "화면 전환")),
                 ("⌘R", L.t("rescan", "새로고침")),
                 ("⌘S", L.t("search mode", "검색모드")),
                 ("⌘,", L.t("settings", "설정")),

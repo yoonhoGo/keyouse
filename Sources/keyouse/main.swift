@@ -136,6 +136,45 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
     }
 
+    // The display this session is on. Defaults to the cursor's screen on activate;
+    // ⌘< / ⌘> moves the session to the previous/next display.
+    private var currentScreen: NSScreen?
+
+    private var cursorScreen: NSScreen? {
+        let loc = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(loc, $0.frame, false) } ?? primaryScreen
+    }
+
+    // A screen's rect in AX/CG global coords (top-left origin at the primary screen's top-left).
+    private func axRect(of screen: NSScreen) -> CGRect {
+        let flipY = primaryScreen?.frame.maxY ?? screen.frame.maxY
+        return CGRect(x: screen.frame.minX, y: flipY - screen.frame.maxY,
+                      width: screen.frame.width, height: screen.frame.height)
+    }
+
+    // ⌘< / ⌘>: move the whole session (overlay window + scan) to the adjacent display.
+    private func switchScreen(_ delta: Int) {
+        let screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
+        guard screens.count > 1, let cur = currentScreen,
+              let i = screens.firstIndex(where: { $0.frame == cur.frame }) else { return }
+        let next = screens[(i + delta + screens.count) % screens.count]
+        moveSession(to: next)
+        rescan()   // refilter() inside re-pins any /w /t > list under the moved panel
+    }
+
+    // Relocate the open overlay (window, highlight coords, panel) onto another display.
+    private func moveSession(to screen: NSScreen) {
+        currentScreen = screen
+        window?.setFrame(screen.frame, display: true)
+        highlight?.axScreen = axRect(of: screen)
+        if let glass = panelGlass { glass.frame.origin = panelOrigin(size: glass.frame.size, on: screen) }
+        regrabFocus()
+    }
+
+    private func panelOrigin(size: NSSize, on screen: NSScreen) -> NSPoint {
+        NSPoint(x: (screen.frame.width - size.width) / 2, y: screen.frame.height * 0.4)
+    }
+
     // Fire on a clean double-tap of the configured trigger modifier: two modifier-alone presses
     // within the window, uninterrupted by any other key or modifier. Only active when the trigger
     // is a double-tap type. ponytail: monotonic uptime clock; 0.35s matches the OS double-click feel.
@@ -160,12 +199,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
     private func activate() {
         if window != nil { regrabFocus(); return }
-        guard let screen = primaryScreen else { return }
+        guard let screen = cursorScreen else { return }
+        currentScreen = screen
         previousApp = NSWorkspace.shared.frontmostApplication
         targetWindow = nil
         expanded = false
-        let hits = AX.scan(screen: screen.frame, expanded: expanded)
-        guard !hits.isEmpty else { return }
+        // No empty-hits bail: the cursor's screen may have nothing scannable (front app elsewhere),
+        // but the panel is still useful there (/w, ⌘< / ⌘> to hop screens).
+        let hits = AX.scan(screen: axRect(of: screen), expanded: expanded)
         allHits = hits; matches = hits; selected = 0; hintBuffer = ""; mode = .search; cmdWasDown = false
 
         let w = OverlayWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -177,7 +218,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
         let container = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
         let hv = HighlightView(frame: container.bounds)
-        hv.screenHeight = screen.frame.height
+        hv.axScreen = axRect(of: screen)
         hv.autoresizingMask = [.width, .height]
         container.addSubview(hv)
 
@@ -186,8 +227,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         pv.field.delegate = self
         let size = Panel.size(showGuide: showGuide)
         let glass = Panel.makeGlass(pv, size: size)
-        glass.frame.origin = NSPoint(x: (screen.frame.width - size.width) / 2,
-                                     y: screen.frame.height * 0.4)
+        glass.frame.origin = panelOrigin(size: size, on: screen)
         container.addSubview(glass)
 
         w.contentView = container
@@ -284,6 +324,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     /// Returns true if consumed (false lets the keystroke reach the search field).
     private func handleKeyDown(keyCode: UInt16, chars: String?, mods: NSEvent.ModifierFlags) -> Bool {
         if mode == .windowPicker { handlePickerKey(keyCode: keyCode, chars: chars); return true }
+        if mods.contains(.command), keyCode == 43, mods.contains(.shift) { switchScreen(-1); return true } // ⌘< prev display
+        if mods.contains(.command), keyCode == 47 { switchScreen(1); return true }           // ⌘> (⌘.도 허용) next display
         if mods.contains(.command), keyCode == 43 { openPreferences(); return true }        // ⌘, settings
         if mods.contains(.command), keyCode == 15 { rescan(); return true }                 // ⌘R rescan
         if mods.contains(.command), keyCode == 1 { expanded.toggle(); rescan(); return true } // ⌘S search mode
@@ -397,16 +439,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             sourceHits = previousApp.map { AX.menuCommandHits(pid: $0.processIdentifier) } ?? []
             return
         }
-        guard let screen = primaryScreen else { sourceHits = []; return }
+        guard let screen = currentScreen else { sourceHits = []; return }
+        let rect = axRect(of: screen)
         switch source {
         case .elements: sourceHits = []
-        case .windows: sourceHits = AX.windowHits(screen: screen.frame)
-        case .tabs: sourceHits = previousApp.map { AX.tabHits(pid: $0.processIdentifier, screen: screen.frame) } ?? []
+        case .windows: sourceHits = AX.windowHits(screen: rect)
+        case .tabs: sourceHits = previousApp.map { AX.tabHits(pid: $0.processIdentifier, screen: rect) } ?? []
         case .all:                                   // every AXPress-able element (forces expanded scan)
             if let win = targetWindow, let pid = previousApp?.processIdentifier {
-                sourceHits = AX.scanWindow(win, appPid: pid, screen: screen.frame, expanded: true)
+                sourceHits = AX.scanWindow(win, appPid: pid, screen: rect, expanded: true)
             } else {
-                sourceHits = AX.scan(screen: screen.frame, frontApp: previousApp, expanded: true)
+                sourceHits = AX.scan(screen: rect, frontApp: previousApp, expanded: true)
             }
         case .menu: break                            // handled above
         }
@@ -429,7 +472,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     // ⌘?: toggle the shortcut guide. The guide is baked into the panel at build time (its height
     // depends on it), so flip the setting and rebuild the panel glass in place, keeping the query.
     private func toggleGuide() {
-        guard let container = window?.contentView, let old = panelGlass, let screen = primaryScreen else { return }
+        guard let container = window?.contentView, let old = panelGlass, let screen = currentScreen else { return }
         Settings.showGuide.toggle()
         let text = panelView?.query ?? ""
         let pv = PanelView(showGuide: Settings.showGuide)
@@ -437,8 +480,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         pv.field.stringValue = text
         let size = Panel.size(showGuide: Settings.showGuide)
         let glass = Panel.makeGlass(pv, size: size)
-        glass.frame.origin = NSPoint(x: (screen.frame.width - size.width) / 2,
-                                     y: screen.frame.height * 0.4)
+        glass.frame.origin = panelOrigin(size: size, on: screen)
         container.addSubview(glass)
         old.removeFromSuperview()
         panelView = pv; panelGlass = glass
@@ -633,11 +675,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
     // ⌘R: re-scan the current target (picked window, else current app) and refresh hints.
     private func rescan() {
-        guard window != nil, let screen = primaryScreen else { return }
+        guard window != nil, let screen = currentScreen else { return }
         if let win = targetWindow, let pid = previousApp?.processIdentifier {
-            allHits = AX.scanWindow(win, appPid: pid, screen: screen.frame, expanded: expanded)
+            allHits = AX.scanWindow(win, appPid: pid, screen: axRect(of: screen), expanded: expanded)
         } else {
-            allHits = AX.scan(screen: screen.frame, frontApp: previousApp, expanded: expanded)
+            allHits = AX.scan(screen: axRect(of: screen), frontApp: previousApp, expanded: expanded)
         }
         selected = 0; hintBuffer = ""
         highlight?.isHidden = false   // re-show hints hidden during scrolling
@@ -691,7 +733,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private func confirmWindow() { selectWindow(windowSel) }
 
     private func selectWindow(_ index: Int) {
-        guard windows.indices.contains(index), let screen = primaryScreen else { return }
+        guard windows.indices.contains(index) else { return }
         let entry = windows[index]
         hideWindowPicker()
         previousApp = NSRunningApplication(processIdentifier: entry.pid)
@@ -699,7 +741,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         AX.raise(entry.element)
         previousApp?.activate()
         expanded = false
-        allHits = AX.scanWindow(entry.element, appPid: entry.pid, screen: screen.frame, expanded: expanded)
+        // The picked window may live on another display — follow it there.
+        if let f = AX.frame(of: entry.element),
+           let home = NSScreen.screens.first(where: { axRect(of: $0).intersects(f) }),
+           home.frame != currentScreen?.frame {
+            moveSession(to: home)
+        }
+        guard let screen = currentScreen else { return }
+        allHits = AX.scanWindow(entry.element, appPid: entry.pid, screen: axRect(of: screen), expanded: expanded)
         matches = allHits; selected = 0; hintBuffer = ""
         panelView?.field.stringValue = ""
         refilter()
@@ -733,7 +782,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none; sticky = false; expanded = false; modActive = false
         source = .elements; sourceHits = []
         if restoreFocus { previousApp?.activate() }
-        previousApp = nil; targetWindow = nil
+        previousApp = nil; targetWindow = nil; currentScreen = nil
     }
 }
 
