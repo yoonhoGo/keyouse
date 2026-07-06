@@ -32,7 +32,7 @@ make uninstall
 
 On first launch, grant permission in **System Settings › Privacy & Security › Accessibility** to the running host (Terminal or keyouse), then run again.
 
-A menu-bar icon appears. Launched from a terminal, the process detaches so the prompt returns right away; running it again keeps a single instance. Quit via the menu-bar icon or `pkill -f keyouse`.
+A menu-bar icon appears. Launched from a terminal, the process detaches so the prompt returns right away; running it again replaces the running instance with the new one. Quit via the menu-bar icon or `pkill -f keyouse`.
 
 ## Usage
 
@@ -54,7 +54,7 @@ Each modifier has one concept: **`⌘` filter (clickables) + commands** · **`�
 | `⌃` (while held) | show form fields only (text / checkbox / radio) |
 | `⌘L` | links only (toggle) |
 | `⌃I` | focus the first input field |
-| `/w` `/t` `/s` | search open windows / tabs / every pressable element |
+| `/w` `/t` `/s` | search open windows / tabs / every pressable element (`/w`·`/t` also list results below the panel) |
 | `>` *(or `⌘P`)* | command palette — search & run the front app's menu commands (shortcut shown; `⏎`/`num` runs) |
 | `⌘?` | show/hide the shortcut guide |
 | `⌘Q` | quit the front app |

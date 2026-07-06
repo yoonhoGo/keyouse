@@ -13,7 +13,7 @@ make install / uninstall      # /usr/local/bin/keyouse (sudo)
 ```
 
 - It's a GUI app with global hotkeys / an event tap, so **interactive behavior can't be verified headlessly**. After a change, confirm it compiles with `swift build -c release`; the user checks real behavior (panel, click, scroll, ⌘Tab) via `make run`.
-- To just check it launches: run, then `pgrep -fl release/keyouse`. Clean up before testing with `pkill -9 -f keyouse; rm -f "${TMPDIR}keyouse.lock"` (single-instance means a second launch exits immediately if one is alive).
+- To just check it launches: run, then `pgrep -fl release/keyouse`. Relaunching **takes over**: a new launch SIGTERMs the pid stored in `${TMPDIR}keyouse.lock` and takes the lock, so `make run` alone replaces a running instance (no manual pkill needed).
 
 ## Layout (Sources/keyouse/)
 
@@ -36,7 +36,7 @@ make install / uninstall      # /usr/local/bin/keyouse (sudo)
 - **Filters.** `⌘` → `Settings.cmdVisibleRoles`, `⌃` → `Settings.ctrlVisibleRoles` (momentary, while held); `⌘L` → sticky links toggle. Updated from modifier `flagsChanged`.
 - **Panel visibility.** While a modifier is held or a number is being entered, apply `Settings.panelActiveOpacity` (0 → `isHidden` for a true removal).
 - **Localization.** English is default; every user-facing string is `L.t("English", "한국어")`. Language is a `Settings` value; the settings window rebuilds and the status menu is rebuilt on change. Panel/guide text applies on next open.
-- **Entry point.** Without `KEYOUSE_DETACHED`, it relaunches itself as a child and the parent `exit(0)`s (terminal returns). The child `setsid()`s and takes an exclusive `flock` on `${TMPDIR}keyouse.lock` for single-instance.
+- **Entry point.** Without `KEYOUSE_DETACHED`, it relaunches itself as a child and the parent `exit(0)`s (terminal returns). The child `setsid()`s and takes an exclusive `flock` on `${TMPDIR}keyouse.lock` for single-instance, writing its pid into the file; a new launch that can't get the lock SIGTERMs that pid and takes over.
 - **Permissions.** Accessibility required. If `CGEventTap` creation fails it only logs and continues (⌘Tab disabled).
 
 ## Distribution / release

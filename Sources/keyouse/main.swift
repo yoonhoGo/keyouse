@@ -388,10 +388,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
     private func rebuildSource() {
         selected = 0; hintBuffer = ""
-        if source != .menu { hideMenuList() }
-        if source == .menu {                         // no screen frame needed — menus render as a list
+        // /w, /t and > show a result list under the panel; > additionally has no overlay to show
+        // (closed menu commands have no screen frames).
+        let wantsList = source == .windows || source == .tabs || source == .menu
+        if wantsList { showResultList() } else { hideResultList() }
+        highlight?.isHidden = (source == .menu)
+        if source == .menu {
             sourceHits = previousApp.map { AX.menuCommandHits(pid: $0.processIdentifier) } ?? []
-            showMenuList(); return
+            return
         }
         guard let screen = primaryScreen else { sourceHits = []; return }
         switch source {
@@ -445,25 +449,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         refilter()   // re-pins the `>` list under the new panel frame too
     }
 
-    // MARK: - `>` command palette (list surface below the panel; no on-screen overlay)
+    // MARK: - result list (below the panel: `>` command palette, /w windows, /t tabs)
 
-    private func showMenuList() {
+    private func showResultList() {
         guard let container = window?.contentView, panelGlass != nil, menuListGlass == nil else { return }
         let lv = CommandListView(frame: .zero)
         let size = NSSize(width: CommandListView.width, height: CommandListView.height(for: matches.count))
         let glass = Panel.makeGlass(lv, size: size)
         container.addSubview(glass)
         menuListView = lv; menuListGlass = glass
-        highlight?.isHidden = true
         layoutMenuList()   // rows filled by the pushHighlights() that follows in refilter()
         updatePanelVisibility()   // un-hide the panel if a held modifier (⌘P) had hidden it
     }
 
-    private func hideMenuList() {
+    private func hideResultList() {
         guard menuListGlass != nil else { return }
         menuListGlass?.removeFromSuperview()
         menuListGlass = nil; menuListView = nil
-        highlight?.isHidden = false
     }
 
     // Size the list to the current match count and pin it just below the search panel.
@@ -503,12 +505,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     }
 
     private func pushHighlights() {
-        if source == .menu {
+        if menuListGlass != nil {
             menuListView?.rows = matches.map { (path: $0.label, shortcut: $0.shortcut) }
             menuListView?.selected = selected
             layoutMenuList()
             menuListView?.needsDisplay = true
-            return
+            if source == .menu { return }   // closed menu items have no frames — list only
         }
         highlight?.rects = matches.map(\.frame)
         highlight?.codes = matches.indices.map { String($0 + 1) }
@@ -751,10 +753,26 @@ if ProcessInfo.processInfo.environment["KEYOUSE_DETACHED"] == nil {
 }
 setsid()   // new session, no controlling terminal -> survives the shell closing
 
-// Single instance: hold an exclusive lock for our lifetime; a second launch can't get it and exits.
-// (fd is intentionally kept open — the lock releases automatically when the process ends.)
+// Single instance with takeover: the lock holder writes its pid into the file. A new launch that
+// can't get the lock SIGTERMs that pid and waits for the lock to free — relaunching always ends
+// with the fresh copy running. (fd stays open — the lock releases when the process ends.)
+// ponytail: a lock from a pre-pid build can't be taken over; one manual `pkill keyouse` clears it.
 let lockFD = open("\(NSTemporaryDirectory())keyouse.lock", O_CREAT | O_RDWR, 0o644)
-if lockFD < 0 || flock(lockFD, LOCK_EX | LOCK_NB) != 0 { exit(0) }
+if lockFD < 0 { exit(1) }
+if flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
+    var buf = [CChar](repeating: 0, count: 32)
+    pread(lockFD, &buf, 31, 0)
+    let pid = pid_t(strtol(buf, nil, 10))
+    if pid > 0 { kill(pid, SIGTERM) }
+    var acquired = false
+    for _ in 0..<40 {                    // up to ~2s for the old instance to exit
+        if flock(lockFD, LOCK_EX | LOCK_NB) == 0 { acquired = true; break }
+        usleep(50_000)
+    }
+    if !acquired { fputs("keyouse: another instance wouldn't yield the lock\n", stderr); exit(1) }
+}
+ftruncate(lockFD, 0)
+_ = "\(getpid())".withCString { pwrite(lockFD, $0, strlen($0), 0) }
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
