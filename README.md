@@ -38,6 +38,8 @@ A menu-bar icon appears. Launched from a terminal, the process detaches so the p
 
 Default trigger **`⌘⇧Space`** opens the search panel. Rebind it to any combo — or to a **double-tapped modifier** like `⌘⌘` (Settings).
 
+Each modifier has one concept: **`⌘` filter (clickables) + commands** · **`⌃` filter (form fields)** · **`⇧` amplify the key's base action** (click→new tab, move→scroll, ←→→history) · **`⌥` right-click**.
+
 | Key | Action |
 |-----|--------|
 | type text | filter elements by label (IME/CJK supported) |
@@ -53,6 +55,7 @@ Default trigger **`⌘⇧Space`** opens the search panel. Rebind it to any combo
 | `⌘L` | links only (toggle) |
 | `⌃I` | focus the first input field |
 | `/w` `/t` `/s` | search open windows / tabs / every pressable element |
+| `>` | command palette — search & run the front app's menu commands (shortcut shown; `⏎`/`num` runs) |
 | `⌘Q` | quit the front app |
 | `⌘W` / `⌘⇧W` | close the current tab / window |
 | `⌘Tab` | window picker · next (`⇧⌘Tab` prev, `⌘←→↑↓` move, release `⌘` to choose) |

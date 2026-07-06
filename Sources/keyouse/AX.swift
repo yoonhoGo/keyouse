@@ -11,6 +11,7 @@ struct Hit {
     let subrole: String
     let label: String
     let frame: CGRect   // AX/global coords: top-left origin
+    var shortcut: String = ""   // "⌘S" for `>` menu-command mode; empty otherwise
 }
 
 struct WindowInfo {
@@ -212,6 +213,59 @@ enum AX {
         if let children = attr(e, kAXChildrenAttribute as String) as? [AXUIElement] {
             for c in children { collectTabs(c, pid: pid, screen: screen, depth: depth + 1, inTabGroup: here, into: &hits) }
         }
+    }
+
+    /// Every executable menu command of an app (`>` command-palette mode). Walks the full menu-bar
+    /// tree — no on-screen frame (menus are closed), so these render as a list, not overlay badges.
+    /// Acting = AXPress, which fires a leaf item even while its menu is closed (VoiceOver's mechanism).
+    /// ponytail ceiling: apps that build menus lazily on open (some Electron) don't expose children
+    /// until shown, so those commands simply won't be listed. Standard AppKit menus are fully present.
+    static func menuCommandHits(pid: pid_t) -> [Hit] {
+        let app = AXUIElementCreateApplication(pid)
+        guard let mbAny = attr(app, kAXMenuBarAttribute as String) else { return [] }
+        var out: [Hit] = []
+        for barItem in (attr(mbAny as! AXUIElement, kAXChildrenAttribute as String) as? [AXUIElement] ?? []) {
+            let title = str(barItem, kAXTitleAttribute as String) ?? ""
+            if title == "Apple" { continue }   // ponytail: system-wide Apple menu, not the app's — skip.
+            if let submenu = childMenu(of: barItem) {
+                walkMenu(submenu, pid: pid, path: title, depth: 0, into: &out)
+            }
+        }
+        return out
+    }
+
+    private static func childMenu(of item: AXUIElement) -> AXUIElement? {
+        (attr(item, kAXChildrenAttribute as String) as? [AXUIElement])?
+            .first { str($0, kAXRoleAttribute as String) == "AXMenu" }
+    }
+
+    private static func walkMenu(_ menu: AXUIElement, pid: pid_t, path: String, depth: Int, into out: inout [Hit]) {
+        if depth > 12 { return }   // ponytail: real menus never nest this deep.
+        for item in (attr(menu, kAXChildrenAttribute as String) as? [AXUIElement] ?? []) {
+            let title = str(item, kAXTitleAttribute as String) ?? ""
+            if title.isEmpty { continue }                       // separators
+            if let sub = childMenu(of: item) {                  // has submenu -> descend
+                walkMenu(sub, pid: pid, path: "\(path) › \(title)", depth: depth + 1, into: &out)
+                continue
+            }
+            if (attr(item, kAXEnabledAttribute as String) as? Bool) == false { continue }
+            guard actions(item).contains("AXPress") else { continue }
+            out.append(Hit(element: item, pid: pid, role: "AXMenuItem", subrole: "",
+                           label: "\(path) › \(title)", frame: .zero, shortcut: menuShortcut(item)))
+        }
+    }
+
+    /// Format a menu item's key equivalent ("⌘S", "⌥⌘I"). Empty when there's none, or when it's a
+    /// virtual-key-only shortcut (arrows/F-keys — ponytail: mapping that table isn't worth it).
+    private static func menuShortcut(_ item: AXUIElement) -> String {
+        guard let ch = str(item, "AXMenuItemCmdChar"), !ch.isEmpty else { return "" }
+        let m = (attr(item, "AXMenuItemCmdModifiers") as? Int) ?? 0
+        var s = ""
+        if m & 4 != 0 { s += "⌃" }              // control
+        if m & 2 != 0 { s += "⌥" }              // option
+        if m & 1 != 0 { s += "⇧" }              // shift
+        if m & 8 == 0 { s += "⌘" }              // command present unless the "no command" bit is set
+        return s + ch.uppercased()
     }
 
     /// Synthesize a ⌘-based shortcut (⌘Q/⌘W/⌘⇧W) and deliver it straight to a process.

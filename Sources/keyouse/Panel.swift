@@ -28,6 +28,7 @@ final class PanelView: NSView {
                 ("/w", L.t("windows", "윈도우")),
                 ("/t", L.t("tabs", "탭")),
                 ("/s", L.t("search mode", "검색모드")),
+                (">", L.t("commands", "명령")),
             ]),
             (L.t("Close · Misc", "닫기 · 기타"), [
                 ("⌘Q", L.t("quit app", "앱 종료")),

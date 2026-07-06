@@ -62,9 +62,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private enum Filter { case none, controls, forms, links }
     private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields, ⌘L -> links (sticky)
     private var sticky = false            // true when filter is a toggle (⌘L), not a held modifier
-    private enum Source { case elements, windows, tabs, all }
-    private var source: Source = .elements   // /w -> windows, /t -> tabs, /s -> every pressable element
+    private enum Source { case elements, windows, tabs, all, menu }
+    private var source: Source = .elements   // /w -> windows, /t -> tabs, /s -> every pressable, > -> menu commands
     private var sourceHits: [Hit] = []        // cached window/tab hits for the active search mode
+    private var menuListGlass: NSView?        // `>` command palette: list surface below the panel
+    private var menuListView: CommandListView?
     private var expanded = false          // ⌘S: also collect AXPress-actionable elements (web/Electron)
     private lazy var settings: SettingsWindow = {
         let s = SettingsWindow()
@@ -206,7 +208,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             if e.type == .flagsChanged {
                 let cmd = e.modifierFlags.contains(.command)
                 let ctrl = e.modifierFlags.contains(.control)
-                let anyMod = !e.modifierFlags.intersection([.command, .control, .shift, .option]).isEmpty
+                // Only the filter modifiers dim/hide the panel. Shift/Option are text & click
+                // modifiers (⇧ types `>` / capitals, ⌥ = right-click) — hiding on them drops the
+                // field's first-responder status mid-keystroke, so a Shift char never lands.
+                let anyMod = !e.modifierFlags.intersection([.command, .control]).isEmpty
                 MainActor.assumeIsolated {
                     self?.setFilter(cmd: cmd, ctrl: ctrl)
                     self?.modActive = anyMod
@@ -370,6 +375,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     // A leading "/w" or "/t" (exact, or followed by a space) switches the search pool to open
     // windows / current-app tabs; the rest is the filter text. Otherwise it's normal element search.
     private static func parseSource(_ raw: String) -> (Source, String) {
+        // Command-palette convention: no space needed (`>new` filters right away).
+        if raw.hasPrefix(">") { return (.menu, String(raw.dropFirst()).trimmingCharacters(in: .whitespaces)) }
         for (p, s) in [("/w", Source.windows), ("/t", Source.tabs), ("/s", Source.all)] {
             if raw == p { return (s, "") }
             if raw.hasPrefix(p + " ") { return (s, String(raw.dropFirst(p.count + 1)).trimmingCharacters(in: .whitespaces)) }
@@ -379,6 +386,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
     private func rebuildSource() {
         selected = 0; hintBuffer = ""
+        if source != .menu { hideMenuList() }
+        if source == .menu {                         // no screen frame needed — menus render as a list
+            sourceHits = previousApp.map { AX.menuCommandHits(pid: $0.processIdentifier) } ?? []
+            showMenuList(); return
+        }
         guard let screen = primaryScreen else { sourceHits = []; return }
         switch source {
         case .elements: sourceHits = []
@@ -390,7 +402,38 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             } else {
                 sourceHits = AX.scan(screen: screen.frame, frontApp: previousApp, expanded: true)
             }
+        case .menu: break                            // handled above
         }
+    }
+
+    // MARK: - `>` command palette (list surface below the panel; no on-screen overlay)
+
+    private func showMenuList() {
+        guard let container = window?.contentView, panelGlass != nil, menuListGlass == nil else { return }
+        let lv = CommandListView(frame: .zero)
+        let size = NSSize(width: CommandListView.width, height: CommandListView.height(for: matches.count))
+        let glass = Panel.makeGlass(lv, size: size)
+        container.addSubview(glass)
+        menuListView = lv; menuListGlass = glass
+        highlight?.isHidden = true
+        layoutMenuList()   // rows filled by the pushHighlights() that follows in refilter()
+    }
+
+    private func hideMenuList() {
+        guard menuListGlass != nil else { return }
+        menuListGlass?.removeFromSuperview()
+        menuListGlass = nil; menuListView = nil
+        highlight?.isHidden = false
+    }
+
+    // Size the list to the current match count and pin it just below the search panel.
+    private func layoutMenuList() {
+        guard let glass = menuListGlass, let panelGlass else { return }
+        let h = CommandListView.height(for: matches.count)
+        let size = NSSize(width: CommandListView.width, height: h)
+        glass.frame = NSRect(x: panelGlass.frame.minX, y: panelGlass.frame.minY - h - 12,
+                             width: size.width, height: h)
+        menuListView?.frame = NSRect(origin: .zero, size: size)   // track glass bounds regardless of glass type
     }
 
     // Modifier-held filters: ⌘ -> controls, ⌃ -> form fields; none -> all. Ignored while a sticky
@@ -420,6 +463,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     }
 
     private func pushHighlights() {
+        if source == .menu {
+            menuListView?.rows = matches.map { (path: $0.label, shortcut: $0.shortcut) }
+            menuListView?.selected = selected
+            layoutMenuList()
+            menuListView?.needsDisplay = true
+            return
+        }
         highlight?.rects = matches.map(\.frame)
         highlight?.codes = matches.indices.map { String($0 + 1) }
         highlight?.typed = hintBuffer
@@ -501,6 +551,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         selected = candidates[max(0, min(candidates.count - 1, cur + delta))]
         highlight?.selected = selected
         highlight?.needsDisplay = true
+        menuListView?.selected = selected   // no-op unless `>` mode; draw() re-centres the scroll window
+        menuListView?.needsDisplay = true
     }
 
     private func scrollSelected(pageUp: Bool) {
@@ -631,6 +683,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         window?.orderOut(nil)
         window = nil; highlight = nil; panelView = nil; panelGlass = nil
         pickerGlass = nil; pickerView = nil; windows = []; mode = .search
+        menuListGlass = nil; menuListView = nil; source = .elements; sourceHits = []
         allHits = []; matches = []; selected = 0; hintBuffer = ""; cmdWasDown = false; filter = .none; sticky = false; expanded = false; modActive = false
         source = .elements; sourceHits = []
         if restoreFocus { previousApp?.activate() }
