@@ -190,8 +190,8 @@ enum AX {
         return out
     }
 
-    /// Tabs in the app's focused window (`/t` search mode): AXTab elements plus radio buttons that
-    /// live under an AXTabGroup (Safari/Chrome/… expose tabs this way). Acting = AXPress selects it.
+    /// Tabs in the app's focused window (`/t` search mode): AXTab elements, radio buttons under an
+    /// AXTabGroup, and anything with subrole AXTabButton (Safari). Acting = AXPress selects it.
     static func tabHits(pid: pid_t, screen: CGRect) -> [Hit] {
         let axApp = AXUIElementCreateApplication(pid)
         enableWebA11y(axApp)
@@ -206,7 +206,10 @@ enum AX {
         if depth > 40 { return }
         let role = str(e, kAXRoleAttribute as String) ?? ""
         let here = inTabGroup || role == "AXTabGroup"
+        // Safari's tabs are AXRadioButton with subrole AXTabButton under an AXOpaqueProviderGroup
+        // (not an AXTabGroup), so honor that subrole anywhere in the tree.
         let isTab = role == "AXTab" || (here && role == "AXRadioButton")
+            || str(e, kAXSubroleAttribute as String) == "AXTabButton"
         if isTab, let f = frame(of: e), f.width > 0, f.height > 0, screen.intersects(f) {
             hits.append(Hit(element: e, pid: pid, role: role, subrole: "", label: label(of: e, role: role), frame: f))
         }
