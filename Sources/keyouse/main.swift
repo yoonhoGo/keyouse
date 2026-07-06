@@ -413,7 +413,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         guard let field = panelView?.field else { return }
         field.stringValue = ">"
         window?.makeFirstResponder(field)
-        (field.currentEditor() as? NSTextView)?.setSelectedRange(NSRange(location: 1, length: 0))
+        // makeFirstResponder's field editor selects-all after this call returns; deselect on the
+        // next runloop pass so typing appends after ">" instead of replacing it.
+        DispatchQueue.main.async { [weak field] in
+            field?.currentEditor()?.selectedRange = NSRange(location: 1, length: 0)
+        }
         hintBuffer = ""
         refilter()   // programmatic set doesn't fire controlTextDidChange
     }
@@ -435,8 +439,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         old.removeFromSuperview()
         panelView = pv; panelGlass = glass
         window?.makeFirstResponder(pv.field)
-        (pv.field.currentEditor() as? NSTextView)?
-            .setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        DispatchQueue.main.async { [weak pv] in   // past the field editor's select-all (see ⌘P)
+            pv?.field.currentEditor()?.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+        }
         refilter()   // re-pins the `>` list under the new panel frame too
     }
 
@@ -451,6 +456,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         menuListView = lv; menuListGlass = glass
         highlight?.isHidden = true
         layoutMenuList()   // rows filled by the pushHighlights() that follows in refilter()
+        updatePanelVisibility()   // un-hide the panel if a held modifier (⌘P) had hidden it
     }
 
     private func hideMenuList() {
@@ -517,7 +523,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     // via isHidden so the view is truly removed, not just transparent). Restore on release/clear.
     private func updatePanelVisibility() {
         guard let glass = panelGlass else { return }
-        let active = modActive || !hintBuffer.isEmpty
+        // The window picker (⌘ held by design) and the `>` command list live under the panel and
+        // ARE the UI being used — never hide the panel while either is up.
+        let listUp = mode == .windowPicker || menuListGlass != nil
+        let active = (modActive || !hintBuffer.isEmpty) && !listUp
         if active {
             let o = Settings.panelActiveOpacity
             if o <= 0.01 { glass.isHidden = true }
@@ -659,6 +668,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         pickerView = pv; pickerGlass = glass
         highlight?.isHidden = true
         mode = .windowPicker
+        updatePanelVisibility()   // double-⌘ means ⌘ is held — un-hide the panel for the picker
     }
 
     private func hideWindowPicker() {
