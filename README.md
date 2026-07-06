@@ -55,7 +55,8 @@ Each modifier has one concept: **`⌘` filter (clickables) + commands** · **`�
 | `⌘L` | links only (toggle) |
 | `⌃I` | focus the first input field |
 | `/w` `/t` `/s` | search open windows / tabs / every pressable element |
-| `>` | command palette — search & run the front app's menu commands (shortcut shown; `⏎`/`num` runs) |
+| `>` *(or `⌘P`)* | command palette — search & run the front app's menu commands (shortcut shown; `⏎`/`num` runs) |
+| `⌘?` | show/hide the shortcut guide |
 | `⌘Q` | quit the front app |
 | `⌘W` / `⌘⇧W` | close the current tab / window |
 | `⌘Tab` | window picker · next (`⇧⌘Tab` prev, `⌘←→↑↓` move, release `⌘` to choose) |

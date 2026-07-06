@@ -288,6 +288,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if mods.contains(.command), keyCode == 15 { rescan(); return true }                 // ⌘R rescan
         if mods.contains(.command), keyCode == 1 { expanded.toggle(); rescan(); return true } // ⌘S search mode
         if mods.contains(.command), keyCode == 37 { toggleLinksFilter(); return true }      // ⌘L links
+        if mods.contains(.command), keyCode == 35 { enterCommandPalette(); return true }    // ⌘P command palette
+        if mods.contains(.command), keyCode == 44 { toggleGuide(); return true }            // ⌘? (⌘⇧/, ⌘/도 허용) guide
         if mods.contains(.command), keyCode == 12 { sendShortcut(keyCode: 12, shift: false); return true }               // ⌘Q quit app
         if mods.contains(.command), keyCode == 13 { sendShortcut(keyCode: 13, shift: mods.contains(.shift)); return true } // ⌘W tab / ⌘⇧W window
         if mods.contains(.control), chars?.lowercased() == "i" { focusFirstInput(); return true } // ⌃I first input
@@ -404,6 +406,38 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             }
         case .menu: break                            // handled above
         }
+    }
+
+    // ⌘P: jump straight into the `>` command palette by typing the prefix for you.
+    private func enterCommandPalette() {
+        guard let field = panelView?.field else { return }
+        field.stringValue = ">"
+        window?.makeFirstResponder(field)
+        (field.currentEditor() as? NSTextView)?.setSelectedRange(NSRange(location: 1, length: 0))
+        hintBuffer = ""
+        refilter()   // programmatic set doesn't fire controlTextDidChange
+    }
+
+    // ⌘?: toggle the shortcut guide. The guide is baked into the panel at build time (its height
+    // depends on it), so flip the setting and rebuild the panel glass in place, keeping the query.
+    private func toggleGuide() {
+        guard let container = window?.contentView, let old = panelGlass, let screen = primaryScreen else { return }
+        Settings.showGuide.toggle()
+        let text = panelView?.query ?? ""
+        let pv = PanelView(showGuide: Settings.showGuide)
+        pv.field.delegate = self
+        pv.field.stringValue = text
+        let size = Panel.size(showGuide: Settings.showGuide)
+        let glass = Panel.makeGlass(pv, size: size)
+        glass.frame.origin = NSPoint(x: (screen.frame.width - size.width) / 2,
+                                     y: screen.frame.height * 0.4)
+        container.addSubview(glass)
+        old.removeFromSuperview()
+        panelView = pv; panelGlass = glass
+        window?.makeFirstResponder(pv.field)
+        (pv.field.currentEditor() as? NSTextView)?
+            .setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        refilter()   // re-pins the `>` list under the new panel frame too
     }
 
     // MARK: - `>` command palette (list surface below the panel; no on-screen overlay)
