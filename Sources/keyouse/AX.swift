@@ -84,6 +84,7 @@ enum AX {
         if depth > 40 { return }   // ponytail: cap depth so a pathological tree can't hang the scan.
         let role = str(e, kAXRoleAttribute as String) ?? ""
         let subrole = str(e, kAXSubroleAttribute as String) ?? ""
+        let f = frame(of: e)
         // Default scan is the role whitelist. Expanded scan (⌘S) also grabs anything with an AXPress
         // action — web/Electron use non-button roles (Slack channels, table rows, clickable divs) that
         // the whitelist misses. ponytail: actions() is an extra AX round-trip, so only fire it on the
@@ -91,14 +92,27 @@ enum AX {
         let pressable = actionableRoles.contains(role)
             || (expanded && !role.isEmpty && actions(e).contains("AXPress"))
         if pressable, !chromeSubroles.contains(subrole),
-           let f = frame(of: e), f.width > 0, f.height > 0,
-           screen.intersects(f) {
+           let f, f.width > 0, f.height > 0, screen.intersects(f) {
             hits.append(Hit(element: e, pid: pid, role: role, subrole: subrole,
                             label: label(of: e, role: role), frame: f))
         }
-        if let children = attr(e, kAXChildrenAttribute as String) as? [AXUIElement] {
-            for c in children { collect(c, pid: pid, screen: screen, depth: depth + 1, expanded: expanded, into: &hits) }
+        // Prune: a container whose (non-empty) frame is entirely off-screen can't hold visible
+        // targets. ponytail: assumes children stay inside the parent frame — true enough for scans;
+        // popovers/menus that escape it aren't reachable while our overlay is up anyway.
+        if let f, !f.isEmpty, !screen.intersects(f) { return }
+        for c in visibleChildren(e, role: role) {
+            collect(c, pid: pid, screen: screen, depth: depth + 1, expanded: expanded, into: &hits)
         }
+    }
+
+    /// Children to descend into. Tables/outlines/lists expose EVERY row via AXChildren (a 50k-commit
+    /// list in a git client = 50k rows × several sync AX round-trips each, freezing the target app's
+    /// main thread), so prefer the visible-only attribute when the app provides it.
+    private static func visibleChildren(_ e: AXUIElement, role: String) -> [AXUIElement] {
+        let preferred = ["AXTable": "AXVisibleRows", "AXOutline": "AXVisibleRows",
+                         "AXList": "AXVisibleChildren"][role]
+        if let p = preferred, let v = attr(e, p) as? [AXUIElement], !v.isEmpty { return v }
+        return attr(e, kAXChildrenAttribute as String) as? [AXUIElement] ?? []
     }
 
     // Always-available targets: the menu bar's neighbours — Dock and menu-bar extras. Native roles,
@@ -113,12 +127,22 @@ enum AX {
     }
 
     /// Chromium (Chrome/Electron/Edge/Slack…) and Firefox don't build their web-content AX tree
-    /// until an assistive tech asks. Setting these attributes triggers it; harmless on AppKit apps.
-    /// ponytail: fire-and-forget. If Chrome's first scan still comes back empty, the tree builds
-    /// async — prewarm on app activation instead of adding a retry here.
-    static func enableWebA11y(_ app: AXUIElement) {
+    /// until an assistive tech asks. AXManualAccessibility is Electron-only and inert elsewhere, so
+    /// it's set unconditionally. AXEnhancedUserInterface makes AppKit apps build heavier AX trees and
+    /// glitches window-move animations (it also sticks after we exit), so it's scoped to browsers
+    /// that need it for web content. ponytail: known-browser list; extend when one is missed.
+    /// Fire-and-forget — if Chrome's first scan still comes back empty, the tree builds async.
+    static let webBrowserBundleIDs: Set<String> = [
+        "com.google.Chrome", "com.microsoft.edgemac", "com.brave.Browser",
+        "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "org.mozilla.firefox",
+    ]
+
+    static func enableWebA11y(_ app: AXUIElement, pid: pid_t) {
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        if let bid = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier,
+           webBrowserBundleIDs.contains(bid) {
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
     }
 
     /// Clickable elements across the target app (default: frontmost), its menu bar, and the
@@ -128,7 +152,7 @@ enum AX {
         if let front = frontApp ?? NSWorkspace.shared.frontmostApplication {
             let pid = front.processIdentifier
             let app = AXUIElementCreateApplication(pid)
-            enableWebA11y(app)
+            enableWebA11y(app, pid: pid)
             collect(app, pid: pid, screen: screen, depth: 0, expanded: expanded, into: &hits)
             if let mb = attr(app, kAXMenuBarAttribute as String) {
                 collect(mb as! AXUIElement, pid: pid, screen: screen, depth: 0, expanded: expanded, into: &hits)
@@ -142,7 +166,7 @@ enum AX {
     static func scanWindow(_ window: AXUIElement, appPid: pid_t, screen: CGRect, expanded: Bool = false) -> [Hit] {
         var hits: [Hit] = []
         let app = AXUIElementCreateApplication(appPid)
-        enableWebA11y(app)
+        enableWebA11y(app, pid: appPid)
         collect(window, pid: appPid, screen: screen, depth: 0, expanded: expanded, into: &hits)
         if let mb = attr(app, kAXMenuBarAttribute as String) {
             collect(mb as! AXUIElement, pid: appPid, screen: screen, depth: 0, expanded: expanded, into: &hits)
@@ -194,7 +218,7 @@ enum AX {
     /// AXTabGroup, and anything with subrole AXTabButton (Safari). Acting = AXPress selects it.
     static func tabHits(pid: pid_t, screen: CGRect) -> [Hit] {
         let axApp = AXUIElementCreateApplication(pid)
-        enableWebA11y(axApp)
+        enableWebA11y(axApp, pid: pid)
         guard let winObj = attr(axApp, kAXFocusedWindowAttribute as String)
             ?? attr(axApp, kAXMainWindowAttribute as String) else { return [] }
         var out: [Hit] = []
@@ -210,11 +234,13 @@ enum AX {
         // (not an AXTabGroup), so honor that subrole anywhere in the tree.
         let isTab = role == "AXTab" || (here && role == "AXRadioButton")
             || str(e, kAXSubroleAttribute as String) == "AXTabButton"
-        if isTab, let f = frame(of: e), f.width > 0, f.height > 0, screen.intersects(f) {
+        let f = frame(of: e)
+        if isTab, let f, f.width > 0, f.height > 0, screen.intersects(f) {
             hits.append(Hit(element: e, pid: pid, role: role, subrole: "", label: label(of: e, role: role), frame: f))
         }
-        if let children = attr(e, kAXChildrenAttribute as String) as? [AXUIElement] {
-            for c in children { collectTabs(c, pid: pid, screen: screen, depth: depth + 1, inTabGroup: here, into: &hits) }
+        if let f, !f.isEmpty, !screen.intersects(f) { return }   // same off-screen pruning as collect()
+        for c in visibleChildren(e, role: role) {
+            collectTabs(c, pid: pid, screen: screen, depth: depth + 1, inTabGroup: here, into: &hits)
         }
     }
 

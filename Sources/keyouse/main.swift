@@ -79,6 +79,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if !AXIsProcessTrustedWithOptions(opts) {
             print("Accessibility permission required: System Settings > Privacy & Security > Accessibility")
         }
+        // Cap every AX call from this process at 0.5s (default 6s) — a slow target app makes the
+        // scan return partial results instead of hanging both apps.
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.5)
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
             let keyCode = e.keyCode
             let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
