@@ -194,22 +194,19 @@ enum AX {
         return out
     }
 
-    /// Open windows as Hits (role "AXWindow") for the `/w` search mode — highlighted + numbered
-    /// like elements; acting on one raises it. Only windows intersecting the primary screen.
-    static func windowHits(screen: CGRect) -> [Hit] {
+    /// The app's open windows as Hits (role "AXWindow") for the `/w` search mode — highlighted +
+    /// numbered like elements; acting on one raises it. Same-app only: cross-app switching is the
+    /// ⌘Tab window picker's job. Only windows intersecting the session's screen.
+    static func windowHits(pid: pid_t, screen: CGRect) -> [Hit] {
+        let axApp = AXUIElementCreateApplication(pid)
+        guard let wins = attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement] else { return [] }
+        let appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "?"
         var out: [Hit] = []
-        let mypid = ProcessInfo.processInfo.processIdentifier
-        for ra in NSWorkspace.shared.runningApplications
-        where ra.activationPolicy == .regular && ra.processIdentifier != mypid {
-            let axApp = AXUIElementCreateApplication(ra.processIdentifier)
-            guard let wins = attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement] else { continue }
-            let appName = ra.localizedName ?? "?"
-            for w in wins {
-                guard let f = frame(of: w), f.width > 60, f.height > 60, screen.intersects(f) else { continue }
-                let title = str(w, kAXTitleAttribute as String) ?? ""
-                let label = title.isEmpty ? appName : "\(appName) — \(title)"
-                out.append(Hit(element: w, pid: ra.processIdentifier, role: "AXWindow", subrole: "", label: label, frame: f))
-            }
+        for w in wins {
+            guard let f = frame(of: w), f.width > 60, f.height > 60, screen.intersects(f) else { continue }
+            let title = str(w, kAXTitleAttribute as String) ?? ""
+            out.append(Hit(element: w, pid: pid, role: "AXWindow", subrole: "",
+                           label: title.isEmpty ? appName : title, frame: f))
         }
         return out
     }

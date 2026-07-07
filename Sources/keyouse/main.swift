@@ -63,7 +63,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields, ⌘L -> links (sticky)
     private var sticky = false            // true when filter is a toggle (⌘L), not a held modifier
     private enum Source { case elements, windows, tabs, all, menu }
-    private var source: Source = .elements   // /w -> windows, /t -> tabs, /s -> every pressable, > -> menu commands
+    private var source: Source = .elements   // /w -> app windows, /t -> app tabs, /s -> every pressable, > -> menu commands
     private var sourceHits: [Hit] = []        // cached window/tab hits for the active search mode
     private var menuListGlass: NSView?        // `>` command palette: list surface below the panel
     private var menuListView: CommandListView?
@@ -419,8 +419,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         panelView?.update(count: matches.count)
     }
 
-    // A leading "/w" or "/t" (exact, or followed by a space) switches the search pool to open
-    // windows / current-app tabs; the rest is the filter text. Otherwise it's normal element search.
+    // A leading "/w" or "/t" (exact, or followed by a space) switches the search pool to the
+    // current app's windows / tabs; the rest is the filter text. Otherwise it's normal element search.
     private static func parseSource(_ raw: String) -> (Source, String) {
         // Command-palette convention: no space needed (`>new` filters right away).
         if raw.hasPrefix(">") { return (.menu, String(raw.dropFirst()).trimmingCharacters(in: .whitespaces)) }
@@ -446,7 +446,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         let rect = axRect(of: screen)
         switch source {
         case .elements: sourceHits = []
-        case .windows: sourceHits = AX.windowHits(screen: rect)
+        case .windows: sourceHits = previousApp.map { AX.windowHits(pid: $0.processIdentifier, screen: rect) } ?? []
         case .tabs: sourceHits = previousApp.map { AX.tabHits(pid: $0.processIdentifier, screen: rect) } ?? []
         case .all:                                   // every AXPress-able element (forces expanded scan)
             if let win = targetWindow, let pid = previousApp?.processIdentifier {
