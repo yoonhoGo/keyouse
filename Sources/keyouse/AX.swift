@@ -202,9 +202,10 @@ enum AX {
         return out
     }
 
-    /// Open windows as Hits (role "AXWindow") for the `/w` search mode — highlighted + numbered
-    /// like elements; acting on one raises it. Only windows intersecting the primary screen.
-    static func windowHits(screen: CGRect) -> [Hit] {
+    /// Open windows of every app as Hits (role "AXWindow") for the `/w` search mode — the same
+    /// pool as the ⌘Tab window picker, but searchable + numbered. No screen filter (⌘Tab spans
+    /// displays too); off-screen highlights just fall outside the overlay, the list still works.
+    static func windowHits() -> [Hit] {
         var out: [Hit] = []
         let mypid = ProcessInfo.processInfo.processIdentifier
         for ra in NSWorkspace.shared.runningApplications
@@ -213,7 +214,7 @@ enum AX {
             guard let wins = attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement] else { continue }
             let appName = ra.localizedName ?? "?"
             for w in wins {
-                guard let f = frame(of: w), f.width > 60, f.height > 60, screen.intersects(f) else { continue }
+                guard let f = frame(of: w), f.width > 60, f.height > 60 else { continue }
                 let title = str(w, kAXTitleAttribute as String) ?? ""
                 let label = title.isEmpty ? appName : "\(appName) — \(title)"
                 out.append(Hit(element: w, pid: ra.processIdentifier, role: "AXWindow", subrole: "", label: label, frame: f))
@@ -222,15 +223,21 @@ enum AX {
         return out
     }
 
-    /// Tabs in the app's focused window (`/t` search mode): AXTab elements, radio buttons under an
-    /// AXTabGroup, and anything with subrole AXTabButton (Safari). Acting = AXPress selects it.
+    /// Tabs across ALL of the app's open windows (`/t` search mode), focused window's tabs first:
+    /// AXTab elements, radio buttons under an AXTabGroup, and anything with subrole AXTabButton
+    /// (Safari). Acting = AXPress selects it (raising that window if it wasn't focused).
     static func tabHits(pid: pid_t, screen: CGRect) -> [Hit] {
         let axApp = AXUIElementCreateApplication(pid)
         enableWebA11y(axApp, pid: pid)
-        guard let winObj = attr(axApp, kAXFocusedWindowAttribute as String)
-            ?? attr(axApp, kAXMainWindowAttribute as String) else { return [] }
+        var wins = (attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+        if let focusedObj = attr(axApp, kAXFocusedWindowAttribute as String)
+            ?? attr(axApp, kAXMainWindowAttribute as String) {
+            let focused = focusedObj as! AXUIElement
+            wins.removeAll { CFEqual($0, focused) }
+            wins.insert(focused, at: 0)   // numbering starts with the window you're in
+        }
         var out: [Hit] = []
-        collectTabs(winObj as! AXUIElement, pid: pid, screen: screen, depth: 0, inTabGroup: false, into: &out)
+        for w in wins { collectTabs(w, pid: pid, screen: screen, depth: 0, inTabGroup: false, into: &out) }
         return out
     }
 
@@ -315,6 +322,11 @@ enum AX {
             e.flags = flags
             e.postToPid(pid)
         }
+    }
+
+    /// The window containing an element (nil for windowless items like closed menu commands).
+    static func window(of e: AXUIElement) -> AXUIElement? {
+        attr(e, kAXWindowAttribute as String).map { ($0 as! AXUIElement) }
     }
 
     /// Bring a window to the front (its element handle stays valid regardless of focus).

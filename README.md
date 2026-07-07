@@ -54,7 +54,7 @@ Each modifier has one concept: **`⌘` filter (clickables) + commands** · **`�
 | `⌃` (while held) | show form fields only (text / checkbox / radio) |
 | `⌘L` | links only (toggle) |
 | `⌃I` | focus the first input field |
-| `/w` `/t` `/s` | search open windows / tabs / every pressable element (`/w`·`/t` also list results below the panel) |
+| `/w` `/t` `/s` | search open windows (all apps) / the app’s tabs / every pressable element (`/w`·`/t` also list results below the panel) |
 | `>` *(or `⌘P`)* | command palette — search & run the front app's menu commands (shortcut shown; `⏎`/`num` runs) |
 | `⌘?` | show/hide the shortcut guide |
 | `⌘Q` | quit the front app |

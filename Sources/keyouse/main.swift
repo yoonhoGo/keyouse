@@ -63,7 +63,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private var filter: Filter = .none    // ⌘ -> controls, ⌃ -> form fields, ⌘L -> links (sticky)
     private var sticky = false            // true when filter is a toggle (⌘L), not a held modifier
     private enum Source { case elements, windows, tabs, all, menu }
-    private var source: Source = .elements   // /w -> windows, /t -> tabs, /s -> every pressable, > -> menu commands
+    private var source: Source = .elements   // /w -> windows (all apps), /t -> app tabs, /s -> every pressable, > -> menu commands
     private var sourceHits: [Hit] = []        // cached window/tab hits for the active search mode
     private var menuListGlass: NSView?        // `>` command palette: list surface below the panel
     private var menuListView: CommandListView?
@@ -427,7 +427,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     }
 
     // A leading "/w" or "/t" (exact, or followed by a space) switches the search pool to open
-    // windows / current-app tabs; the rest is the filter text. Otherwise it's normal element search.
+    // windows (all apps, like ⌘Tab) / the current app's tabs across its windows; the rest is the
+    // filter text. Otherwise it's normal element search.
     private static func parseSource(_ raw: String) -> (Source, String) {
         // Command-palette convention: no space needed (`>new` filters right away).
         if raw.hasPrefix(">") { return (.menu, String(raw.dropFirst()).trimmingCharacters(in: .whitespaces)) }
@@ -453,7 +454,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         let rect = axRect(of: screen)
         switch source {
         case .elements: sourceHits = []
-        case .windows: sourceHits = AX.windowHits(screen: rect)
+        case .windows: sourceHits = AX.windowHits()   // every app's windows — same pool as ⌘Tab
         case .tabs: sourceHits = previousApp.map { AX.tabHits(pid: $0.processIdentifier, screen: rect) } ?? []
         case .all:                                   // every AXPress-able element (forces expanded scan)
             if let win = targetWindow, let pid = previousApp?.processIdentifier {
@@ -612,12 +613,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
     private func act(on index: Int, kind: ClickKind) {
         guard matches.indices.contains(index) else { return }
         let target = matches[index]
+        let wasTabs = source == .tabs
         dismiss(restoreFocus: false)
         if target.role == "AXWindow" {                       // /w mode: raise the window, not click
             AX.raise(target.element)
             NSRunningApplication(processIdentifier: target.pid)?.activate()
         } else {
             NSRunningApplication(processIdentifier: target.pid)?.activate()
+            // /t can pick a tab in a non-focused window; AXPress alone selects the tab but may
+            // leave that window buried — raise its containing window first.
+            if wasTabs, let win = AX.window(of: target.element) { AX.raise(win) }
             switch kind {
             case .left: AX.press(target)
             case .right: AX.rightClick(target)
