@@ -194,32 +194,42 @@ enum AX {
         return out
     }
 
-    /// The app's open windows as Hits (role "AXWindow") for the `/w` search mode — highlighted +
-    /// numbered like elements; acting on one raises it. Same-app only: cross-app switching is the
-    /// ⌘Tab window picker's job. Only windows intersecting the session's screen.
-    static func windowHits(pid: pid_t, screen: CGRect) -> [Hit] {
-        let axApp = AXUIElementCreateApplication(pid)
-        guard let wins = attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement] else { return [] }
-        let appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "?"
+    /// Open windows of every app as Hits (role "AXWindow") for the `/w` search mode — the same
+    /// pool as the ⌘Tab window picker, but searchable + numbered. No screen filter (⌘Tab spans
+    /// displays too); off-screen highlights just fall outside the overlay, the list still works.
+    static func windowHits() -> [Hit] {
         var out: [Hit] = []
-        for w in wins {
-            guard let f = frame(of: w), f.width > 60, f.height > 60, screen.intersects(f) else { continue }
-            let title = str(w, kAXTitleAttribute as String) ?? ""
-            out.append(Hit(element: w, pid: pid, role: "AXWindow", subrole: "",
-                           label: title.isEmpty ? appName : title, frame: f))
+        let mypid = ProcessInfo.processInfo.processIdentifier
+        for ra in NSWorkspace.shared.runningApplications
+        where ra.activationPolicy == .regular && ra.processIdentifier != mypid {
+            let axApp = AXUIElementCreateApplication(ra.processIdentifier)
+            guard let wins = attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement] else { continue }
+            let appName = ra.localizedName ?? "?"
+            for w in wins {
+                guard let f = frame(of: w), f.width > 60, f.height > 60 else { continue }
+                let title = str(w, kAXTitleAttribute as String) ?? ""
+                let label = title.isEmpty ? appName : "\(appName) — \(title)"
+                out.append(Hit(element: w, pid: ra.processIdentifier, role: "AXWindow", subrole: "", label: label, frame: f))
+            }
         }
         return out
     }
 
-    /// Tabs in the app's focused window (`/t` search mode): AXTab elements, radio buttons under an
-    /// AXTabGroup, and anything with subrole AXTabButton (Safari). Acting = AXPress selects it.
+    /// Tabs across ALL of the app's open windows (`/t` search mode), focused window's tabs first:
+    /// AXTab elements, radio buttons under an AXTabGroup, and anything with subrole AXTabButton
+    /// (Safari). Acting = AXPress selects it (raising that window if it wasn't focused).
     static func tabHits(pid: pid_t, screen: CGRect) -> [Hit] {
         let axApp = AXUIElementCreateApplication(pid)
         enableWebA11y(axApp, pid: pid)
-        guard let winObj = attr(axApp, kAXFocusedWindowAttribute as String)
-            ?? attr(axApp, kAXMainWindowAttribute as String) else { return [] }
+        var wins = (attr(axApp, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+        if let focusedObj = attr(axApp, kAXFocusedWindowAttribute as String)
+            ?? attr(axApp, kAXMainWindowAttribute as String) {
+            let focused = focusedObj as! AXUIElement
+            wins.removeAll { CFEqual($0, focused) }
+            wins.insert(focused, at: 0)   // numbering starts with the window you're in
+        }
         var out: [Hit] = []
-        collectTabs(winObj as! AXUIElement, pid: pid, screen: screen, depth: 0, inTabGroup: false, into: &out)
+        for w in wins { collectTabs(w, pid: pid, screen: screen, depth: 0, inTabGroup: false, into: &out) }
         return out
     }
 
@@ -304,6 +314,11 @@ enum AX {
             e.flags = flags
             e.postToPid(pid)
         }
+    }
+
+    /// The window containing an element (nil for windowless items like closed menu commands).
+    static func window(of e: AXUIElement) -> AXUIElement? {
+        attr(e, kAXWindowAttribute as String).map { ($0 as! AXUIElement) }
     }
 
     /// Bring a window to the front (its element handle stays valid regardless of focus).
