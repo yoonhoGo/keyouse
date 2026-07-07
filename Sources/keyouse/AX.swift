@@ -50,6 +50,14 @@ enum AX {
         return CGRect(origin: point, size: size)
     }
 
+    /// AX frame of the app's focused (or main) window — used to open the session on its display.
+    static func focusedWindowFrame(pid: pid_t) -> CGRect? {
+        let axApp = AXUIElementCreateApplication(pid)
+        guard let win = attr(axApp, kAXFocusedWindowAttribute as String)
+            ?? attr(axApp, kAXMainWindowAttribute as String) else { return nil }
+        return frame(of: win as! AXUIElement)
+    }
+
     static func label(of e: AXUIElement, role: String) -> String {
         if let t = str(e, kAXTitleAttribute as String), !t.isEmpty { return t }
         if let d = str(e, kAXDescriptionAttribute as String), !d.isEmpty { return d }

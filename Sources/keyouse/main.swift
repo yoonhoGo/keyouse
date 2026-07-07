@@ -139,13 +139,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
     }
 
-    // The display this session is on. Defaults to the cursor's screen on activate;
-    // ⌘< / ⌘> moves the session to the previous/next display.
+    // The display this session is on. Defaults to the frontmost app's focused-window screen
+    // on activate (cursor's screen if none); ⌘< / ⌘> moves the session to the prev/next display.
     private var currentScreen: NSScreen?
 
     private var cursorScreen: NSScreen? {
         let loc = NSEvent.mouseLocation
         return NSScreen.screens.first { NSMouseInRect(loc, $0.frame, false) } ?? primaryScreen
+    }
+
+    // The display holding the frontmost app's focused window, matched by the window's center.
+    private func focusedWindowScreen(of app: NSRunningApplication?) -> NSScreen? {
+        guard let pid = app?.processIdentifier,
+              let f = AX.focusedWindowFrame(pid: pid) else { return nil }
+        return NSScreen.screens.first { axRect(of: $0).contains(CGPoint(x: f.midX, y: f.midY)) }
     }
 
     // A screen's rect in AX/CG global coords (top-left origin at the primary screen's top-left).
@@ -202,12 +209,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
 
     private func activate() {
         if window != nil { regrabFocus(); return }
-        guard let screen = cursorScreen else { return }
-        currentScreen = screen
         previousApp = NSWorkspace.shared.frontmostApplication
+        guard let screen = focusedWindowScreen(of: previousApp) ?? cursorScreen else { return }
+        currentScreen = screen
         targetWindow = nil
         expanded = false
-        // No empty-hits bail: the cursor's screen may have nothing scannable (front app elsewhere),
+        // No empty-hits bail: the screen may have nothing scannable,
         // but the panel is still useful there (/w, ⌘< / ⌘> to hop screens).
         let hits = AX.scan(screen: axRect(of: screen), expanded: expanded)
         allHits = hits; matches = hits; selected = 0; hintBuffer = ""; mode = .search; cmdWasDown = false
