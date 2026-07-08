@@ -27,7 +27,7 @@ enum LoginItem {
 
 enum Build {
     // Keep in sync with the release tag. CI (release.yml) rewrites this on tag push.
-    static let version = "0.2.0"
+    static let version = "0.4.0"
     static let repo = "yoonhoGo/keyouse"
 }
 
