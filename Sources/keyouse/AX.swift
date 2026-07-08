@@ -153,6 +153,27 @@ enum AX {
         }
     }
 
+    /// The app owning the topmost normal-layer window intersecting `screen` (AX/CG top-left
+    /// coords). CGWindowList is front-to-back, so the first match is what the user sees on top
+    /// of that display — the right scan target when the session hops to a display the frontmost
+    /// app has no window on.
+    static func frontmostApp(on screen: CGRect) -> NSRunningApplication? {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else { return nil }
+        let mypid = ProcessInfo.processInfo.processIdentifier
+        for info in list {
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t, pid != mypid,
+                  let b = info[kCGWindowBounds as String] as? NSDictionary,
+                  let f = CGRect(dictionaryRepresentation: b),
+                  f.width > 60, f.height > 60, screen.intersects(f),
+                  let app = NSRunningApplication(processIdentifier: pid),
+                  app.activationPolicy == .regular else { continue }
+            return app
+        }
+        return nil
+    }
+
     /// Clickable elements across the target app (default: frontmost), its menu bar, and the
     /// Dock / menu extras.
     static func scan(screen: CGRect, frontApp: NSRunningApplication? = nil, expanded: Bool = false) -> [Hit] {

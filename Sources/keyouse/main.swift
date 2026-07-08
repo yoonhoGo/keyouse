@@ -162,6 +162,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
                       width: screen.frame.width, height: screen.frame.height)
     }
 
+    // The scan target for a screen: the app owning its topmost window. That's the front app when
+    // the session sits on the front app's display, and the app the user actually sees after a
+    // ⌘< / ⌘> hop to a display the front app has no window on (scanning previousApp there finds
+    // nothing — its windows don't intersect the screen).
+    private func scanApp(on screen: NSScreen) -> NSRunningApplication? {
+        AX.frontmostApp(on: axRect(of: screen)) ?? previousApp
+    }
+
     // ⌘< / ⌘>: move the whole session (overlay window + scan) to the adjacent display.
     private func switchScreen(_ delta: Int) {
         let screens = NSScreen.screens.sorted { $0.frame.minX < $1.frame.minX }
@@ -216,7 +224,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         expanded = false
         // No empty-hits bail: the screen may have nothing scannable,
         // but the panel is still useful there (/w, ⌘< / ⌘> to hop screens).
-        let hits = AX.scan(screen: axRect(of: screen), expanded: expanded)
+        let hits = AX.scan(screen: axRect(of: screen), frontApp: scanApp(on: screen), expanded: expanded)
         allHits = hits; matches = hits; selected = 0; hintBuffer = ""; mode = .search; cmdWasDown = false
 
         let w = OverlayWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -460,7 +468,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
             if let win = targetWindow, let pid = previousApp?.processIdentifier {
                 sourceHits = AX.scanWindow(win, appPid: pid, screen: rect, expanded: true)
             } else {
-                sourceHits = AX.scan(screen: rect, frontApp: previousApp, expanded: true)
+                sourceHits = AX.scan(screen: rect, frontApp: scanApp(on: screen), expanded: true)
             }
         case .menu: break                            // handled above
         }
@@ -694,7 +702,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTextFieldDelegate,
         if let win = targetWindow, let pid = previousApp?.processIdentifier {
             allHits = AX.scanWindow(win, appPid: pid, screen: axRect(of: screen), expanded: expanded)
         } else {
-            allHits = AX.scan(screen: axRect(of: screen), frontApp: previousApp, expanded: expanded)
+            allHits = AX.scan(screen: axRect(of: screen), frontApp: scanApp(on: screen), expanded: expanded)
         }
         selected = 0; hintBuffer = ""
         highlight?.isHidden = false   // re-show hints hidden during scrolling
